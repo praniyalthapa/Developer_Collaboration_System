@@ -1,0 +1,38 @@
+version: "3.9"
+services:
+  mongo:
+    image: mongo:6
+    container_name: mongo_db
+    restart: always
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  backend:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    container_name: express_backend
+    ports:
+      - "7777:7777"
+    env_file:
+      - ./apps/backend/.env
+    depends_on:
+      - mongo
+
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    container_name: react_frontend
+    restart: always
+    ports:
+      - "5173:80"
+    env_file:
+      - ./apps/frontend/.env
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:
