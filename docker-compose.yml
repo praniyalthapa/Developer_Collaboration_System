@@ -1,0 +1,52 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: devcollab_mongo
+    restart: unless-stopped
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    container_name: devcollab_backend
+    restart: unless-stopped
+    ports:
+      - "7777:7777"
+    environment:
+      PORT: "7777"
+      HOST: "0.0.0.0"
+      NODE_ENV: "production"
+      MONGO_URI: "mongodb://mongo:27017/devcollab"
+      JWT_SECRET: "${JWT_SECRET:-change-me-in-production-please-use-a-long-random-secret}"
+      CORS_ORIGIN: "http://localhost:5173"
+      WEB_APP_URL: "http://localhost:5173"
+      BACKEND_BASE_URL: "http://localhost:7777"
+      RUN_SEED: "true"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: "/api"
+    container_name: devcollab_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:
