@@ -20,6 +20,7 @@
     "lint": "npm-run-all lint:backend lint:frontend",
     "lint:backend": "npm --prefix apps/backend run lint",
     "lint:frontend": "npm --prefix apps/frontend run lint",
+    "test": "npm --prefix apps/backend run test",
     "seed": "npm --prefix apps/backend run seed"
   },
   "devDependencies": {

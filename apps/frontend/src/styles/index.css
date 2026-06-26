@@ -1,0 +1,125 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply font-sans antialiased text-base-content;
+    position: relative;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  [data-theme="devcollab-dark"] body {
+    background-color: #0a0a16;
+  }
+  [data-theme="devcollab-light"] body {
+    background-color: #eef0f9;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full;
+    background-color: oklch(var(--p) / 0.4);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: oklch(var(--p) / 0.65);
+  }
+}
+
+@layer components {
+  .surface {
+    @apply relative rounded-2xl shadow-card;
+    background-color: oklch(var(--b1) / 0.92);
+    border: 1px solid oklch(var(--bc) / 0.1);
+  }
+
+  /* Kept as a no-op for backwards compatibility; surfaces use a solid border. */
+  .gradient-border {
+    position: relative;
+  }
+
+  .surface-hover {
+    @apply transition-all duration-300;
+  }
+  .surface-hover:hover {
+    @apply shadow-card-hover;
+    transform: translateY(-4px);
+  }
+
+  .page {
+    @apply mx-auto w-full max-w-screen-2xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .gradient-text {
+    color: oklch(var(--p));
+  }
+
+  .btn-brand {
+    border: none !important;
+    color: oklch(var(--pc)) !important;
+    background-color: oklch(var(--p)) !important;
+    background-image: none !important;
+    transition: filter 0.15s ease, transform 0.15s ease;
+  }
+  .btn-brand:hover {
+    filter: brightness(1.06);
+  }
+
+  .skill-chip {
+    @apply inline-flex items-center rounded-md px-2.5 py-1 font-mono text-[11px] font-medium;
+    background-color: oklch(var(--p) / 0.12);
+    color: oklch(var(--p));
+    border: 1px solid oklch(var(--p) / 0.2);
+  }
+
+  .nav-pill {
+    @apply rounded-full px-4 py-2 text-sm font-medium transition-colors;
+    color: oklch(var(--bc) / 0.6);
+  }
+  .nav-pill:hover {
+    color: oklch(var(--bc));
+    background-color: oklch(var(--bc) / 0.06);
+  }
+  .nav-pill-active {
+    color: oklch(var(--p));
+    background-color: oklch(var(--p) / 0.14);
+  }
+
+  .stat-tile {
+    @apply surface p-5;
+  }
+
+  .kbd-key {
+    @apply inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-base-content/15 bg-base-100/60 px-1.5 font-mono text-xs;
+  }
+}
+
+@layer utilities {
+  .glass-strong {
+    background-color: oklch(var(--b1) / 0.7);
+    backdrop-filter: blur(18px);
+  }
+  .mono {
+    @apply font-mono;
+  }
+  .stagger > * {
+    animation: fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .stagger > *:nth-child(1) { animation-delay: 0.02s; }
+  .stagger > *:nth-child(2) { animation-delay: 0.06s; }
+  .stagger > *:nth-child(3) { animation-delay: 0.1s; }
+  .stagger > *:nth-child(4) { animation-delay: 0.14s; }
+  .stagger > *:nth-child(5) { animation-delay: 0.18s; }
+  .stagger > *:nth-child(6) { animation-delay: 0.22s; }
+  .stagger > *:nth-child(7) { animation-delay: 0.26s; }
+  .stagger > *:nth-child(8) { animation-delay: 0.3s; }
+}

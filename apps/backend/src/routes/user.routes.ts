@@ -1,0 +1,17 @@
+import { Router } from "express";
+import { authenticate } from "../middlewares/authenticate";
+import { asyncHandler } from "../utils/asyncHandler";
+import {
+  connections,
+  feed,
+  receivedRequests,
+  sentRequests,
+} from "../controllers/user.controller";
+
+export const userRoutes = Router();
+
+userRoutes.use(authenticate);
+userRoutes.get("/user/requests/received", asyncHandler(receivedRequests));
+userRoutes.get("/user/requests/sent", asyncHandler(sentRequests));
+userRoutes.get("/user/connections", asyncHandler(connections));
+userRoutes.get("/feed", asyncHandler(feed));
