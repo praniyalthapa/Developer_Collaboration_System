@@ -2,6 +2,7 @@ import { apiClient, unwrap } from "../lib/apiClient";
 import type {
   ReceivedRequest,
   SafeUser,
+  SearchUser,
   SentRequest,
 } from "../types/models";
 
@@ -20,8 +21,8 @@ export const getConnections = async (): Promise<SafeUser[]> => {
   return unwrap(res.data);
 };
 
-export const searchUsers = async (query: string): Promise<SafeUser[]> => {
-  const res = await apiClient.get<{ data: SafeUser[] }>("/user/search", {
+export const searchUsers = async (query: string): Promise<SearchUser[]> => {
+  const res = await apiClient.get<{ data: SearchUser[] }>("/user/search", {
     params: { q: query },
   });
   return unwrap(res.data);

@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
 import { Types } from "mongoose";
+import * as Y from "yjs";
 import { corsOrigins } from "../config/env";
 import { Chat } from "../models/chat.model";
 import { CodeSession } from "../models/codeSession.model";
@@ -15,9 +16,12 @@ interface Participant {
 }
 
 interface ActiveSession {
-  code: string;
+  // The Yjs document is the source of truth for the shared editor. It supports
+  // true concurrent editing (character-level merges) instead of last-write-wins.
+  doc: Y.Doc;
   language: string;
   participants: Participant[];
+  saveTimer: NodeJS.Timeout | null;
 }
 
 interface JoinChatPayload {
@@ -44,7 +48,12 @@ interface ClientToServerEvents {
   joinChat: (payload: JoinChatPayload) => void;
   sendMessage: (payload: SendMessagePayload) => void;
   joinCodeSession: (payload: JoinCodeSessionPayload) => void;
-  codeChange: (payload: { sessionId: string; code: string }) => void;
+  yjsUpdate: (payload: { sessionId: string; update: number[] }) => void;
+  sessionChat: (payload: {
+    sessionId: string;
+    userName: string;
+    text: string;
+  }) => void;
   languageChange: (payload: { sessionId: string; language: string }) => void;
   userTyping: (payload: { sessionId: string; userName: string }) => void;
   userStoppedTyping: (payload: { sessionId: string }) => void;
@@ -84,6 +93,13 @@ interface ServerToClientEvents {
   messagesDelivered: (payload: { withUserId: string }) => void;
   messagesRead: (payload: { withUserId: string }) => void;
   codeUpdate: (payload: { code: string; language?: string }) => void;
+  yjsSync: (payload: { update: number[] }) => void;
+  yjsUpdate: (payload: { update: number[] }) => void;
+  sessionChatMessage: (payload: {
+    userName: string;
+    text: string;
+    at: string;
+  }) => void;
   languageUpdate: (payload: { language: string }) => void;
   participantJoined: (payload: {
     userName: string;
@@ -119,7 +135,19 @@ interface ServerToClientEvents {
   presenceState: (payload: { userIds: string[] }) => void;
   presenceOnline: (payload: { userId: string }) => void;
   presenceOffline: (payload: { userId: string }) => void;
+  connectionRequestReceived: (payload: {
+    fromUserId: string;
+    fromName: string;
+  }) => void;
 }
+
+type AppServer = Server<ClientToServerEvents, ServerToClientEvents>;
+
+// Module-level handle so HTTP controllers (e.g. sending a connection request)
+// can push realtime notifications to a user's socket room without threading the
+// io instance through every layer.
+let ioRef: AppServer | null = null;
+export const getIo = (): AppServer | null => ioRef;
 
 const isSupportedLanguage = (value: string): value is SupportedLanguage =>
   (SUPPORTED_LANGUAGES as readonly string[]).includes(value);
@@ -130,8 +158,27 @@ export const initializeSocket = (
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(server, {
     cors: { origin: corsOrigins, methods: ["GET", "POST"], credentials: true },
   });
+  ioRef = io;
 
   const activeSessions = new Map<string, ActiveSession>();
+
+  const persistSession = async (
+    sessionId: string,
+    active: ActiveSession,
+  ): Promise<void> => {
+    try {
+      await CodeSession.findOneAndUpdate(
+        { sessionId },
+        {
+          code: active.doc.getText("monaco").toString(),
+          language: active.language,
+          lastActivity: new Date(),
+        },
+      );
+    } catch (error) {
+      logger.error("Socket persistSession failed", error);
+    }
+  };
   const callRooms = new Map<string, Map<string, string>>();
   const onlineUsers = new Map<string, Set<string>>();
   const socketToUser = new Map<string, string>();
@@ -246,10 +293,14 @@ export const initializeSocket = (
 
         let active = activeSessions.get(sessionId);
         if (!active) {
+          // First person in: hydrate a fresh Yjs doc from the last-saved code.
+          const doc = new Y.Doc();
+          if (session.code) doc.getText("monaco").insert(0, session.code);
           active = {
-            code: session.code,
+            doc,
             language: session.language,
             participants: [],
+            saveTimer: null,
           };
           activeSessions.set(sessionId, active);
         }
@@ -259,7 +310,12 @@ export const initializeSocket = (
         );
         active.participants.push({ socketId: socket.id, userId, userName });
 
-        socket.emit("codeUpdate", { code: active.code, language: active.language });
+        // Ship the full document state so the joiner's editor converges to the
+        // current shared content, then the language.
+        socket.emit("yjsSync", {
+          update: Array.from(Y.encodeStateAsUpdate(active.doc)),
+        });
+        socket.emit("languageUpdate", { language: active.language });
         io.to(sessionId).emit("participantJoined", {
           userName,
           participants: active.participants,
@@ -270,19 +326,27 @@ export const initializeSocket = (
       }
     });
 
-    socket.on("codeChange", async ({ sessionId, code }) => {
+    socket.on("yjsUpdate", ({ sessionId, update }) => {
       const active = activeSessions.get(sessionId);
       if (!active) return;
-      active.code = code;
-      socket.to(sessionId).emit("codeUpdate", { code });
-      try {
-        await CodeSession.findOneAndUpdate(
-          { sessionId },
-          { code, lastActivity: new Date() },
-        );
-      } catch (error) {
-        logger.error("Socket codeChange persist failed", error);
-      }
+      // Apply the incremental CRDT update to the authoritative doc, fan it out to
+      // the other participants, and debounce a write-back to the database.
+      Y.applyUpdate(active.doc, Uint8Array.from(update));
+      socket.to(sessionId).emit("yjsUpdate", { update });
+      if (active.saveTimer) clearTimeout(active.saveTimer);
+      active.saveTimer = setTimeout(() => {
+        void persistSession(sessionId, active);
+      }, 800);
+    });
+
+    socket.on("sessionChat", ({ sessionId, userName, text }) => {
+      const trimmed = text?.trim();
+      if (!trimmed) return;
+      io.to(sessionId).emit("sessionChatMessage", {
+        userName,
+        text: trimmed,
+        at: new Date().toISOString(),
+      });
     });
 
     socket.on("languageChange", async ({ sessionId, language }) => {
@@ -323,6 +387,9 @@ export const initializeSocket = (
         participants: active.participants,
       });
       if (active.participants.length === 0) {
+        // Everyone left — flush the final state before discarding the doc.
+        if (active.saveTimer) clearTimeout(active.saveTimer);
+        void persistSession(sessionId, active);
         activeSessions.delete(sessionId);
       }
     };

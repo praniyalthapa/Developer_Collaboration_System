@@ -13,6 +13,8 @@ export const Sidebar = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
 
+  const pendingRequests = useAppSelector((state) => state.request?.length ?? 0);
+
   const items = NAV_ITEMS.filter(
     (item) => !item.adminOnly || user?.role === "admin",
   );
@@ -54,6 +56,11 @@ export const Sidebar = () => {
           >
             <Icon name={item.icon} className="h-5 w-5" />
             {item.label}
+            {item.to === "/requests" && pendingRequests > 0 ? (
+              <span className="badge badge-primary badge-sm ml-auto">
+                {pendingRequests > 9 ? "9+" : pendingRequests}
+              </span>
+            ) : null}
           </NavLink>
         ))}
       </nav>

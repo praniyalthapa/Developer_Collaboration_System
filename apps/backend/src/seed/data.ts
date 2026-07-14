@@ -29,7 +29,7 @@ export const buildAdminUser = (
   about:
     "Platform administrator for DevCollab. Full access to user management and analytics.",
   skills: ["TypeScript", "Node.js", "MongoDB", "React", "DevOps"],
-  photoUrl: "https://randomuser.me/api/portraits/men/32.jpg",
+  photoUrl: "/api/uploads/aashish-neupane.jpg",
 });
 
 // Accepted (mutual) connections between demo accounts.
@@ -83,7 +83,7 @@ export const demoUsers: SeedUser[] = [
     about:
       "Full-stack engineer who enjoys building accessible interfaces and clean APIs.",
     skills: ["React", "TypeScript", "Node.js", "GraphQL", "Tailwind"],
-    photoUrl: "https://randomuser.me/api/portraits/women/44.jpg",
+    photoUrl: "/api/uploads/bartika-rai.jpg",
   },
   {
     firstName: "Aadarsha",

@@ -4,7 +4,7 @@ import {
   type IConnectionRequest,
 } from "../models/connectionRequest.model";
 import { User, USER_SAFE_FIELDS } from "../models/user.model";
-import type { SafeUser } from "../types/dto";
+import type { RelationshipStatus, SafeUser, SearchUser } from "../types/dto";
 import type { Pagination } from "../validators/common";
 
 interface ReceivedRequest {
@@ -64,20 +64,68 @@ export const getConnections = async (
 export const searchUsers = async (
   userId: Types.ObjectId,
   query: string,
-): Promise<SafeUser[]> => {
+): Promise<SearchUser[]> => {
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
 
   const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(escaped, "i");
 
-  return User.find({
+  const users = await User.find({
     _id: { $ne: userId },
     $or: [{ firstName: regex }, { lastName: regex }, { skills: regex }],
   })
     .select(USER_SAFE_FIELDS)
     .limit(10)
     .lean<SafeUser[]>();
+
+  if (users.length === 0) return [];
+
+  // Resolve how the viewer relates to each match so the UI can show an honest
+  // action. A request existing in ANY state means we can't send a fresh one.
+  const ids = users.map((user) => user._id);
+  const requests = await ConnectionRequest.find({
+    $or: [
+      { fromUserId: userId, toUserId: { $in: ids } },
+      { toUserId: userId, fromUserId: { $in: ids } },
+    ],
+  })
+    .select("fromUserId toUserId status")
+    .lean<
+      Array<{
+        fromUserId: Types.ObjectId;
+        toUserId: Types.ObjectId;
+        status: IConnectionRequest["status"];
+      }>
+    >();
+
+  const statusByUser = new Map<string, RelationshipStatus>();
+  for (const request of requests) {
+    const iAmSender = request.fromUserId.equals(userId);
+    const otherId = (
+      iAmSender ? request.toUserId : request.fromUserId
+    ).toString();
+    let status: RelationshipStatus;
+    if (request.status === "accepted") {
+      status = "connected";
+    } else if (request.status === "interested") {
+      // Only a still-pending request is actionable.
+      status = iAmSender ? "requested" : "incoming";
+    } else {
+      // rejected / ignored: the request is resolved and stale, so it leaves no
+      // active relationship — treat as "none" so a fresh request can be sent.
+      continue;
+    }
+    // "connected" is the strongest signal — never let it be downgraded.
+    if (statusByUser.get(otherId) !== "connected") {
+      statusByUser.set(otherId, status);
+    }
+  }
+
+  return users.map((user) => ({
+    ...user,
+    connectionStatus: statusByUser.get(user._id.toString()) ?? "none",
+  }));
 };
 
 export const getFeed = async (

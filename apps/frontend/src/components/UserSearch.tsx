@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { searchUsers } from "../api/user.api";
 import { sendRequest } from "../api/request.api";
 import { getErrorMessage } from "../lib/apiClient";
 import { useToast } from "../context/toastStore";
 import { Avatar } from "./Avatar";
 import { Icon } from "./icons";
-import type { SafeUser } from "../types/models";
+import type { RelationshipStatus, SearchUser } from "../types/models";
 
 export const UserSearch = () => {
   const { push } = useToast();
+  const navigate = useNavigate();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SafeUser[]>([]);
+  const [results, setResults] = useState<SearchUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState<Record<string, boolean>>({});
   const reqRef = useRef(0);
@@ -39,7 +41,7 @@ export const UserSearch = () => {
     return () => window.clearTimeout(timer);
   }, [query]);
 
-  const connect = async (user: SafeUser) => {
+  const connect = async (user: SearchUser) => {
     setSent((current) => ({ ...current, [user._id]: true }));
     try {
       await sendRequest("interested", user._id);
@@ -50,13 +52,22 @@ export const UserSearch = () => {
     } catch (error) {
       const message = getErrorMessage(error);
       if (/already exists/i.test(message)) {
-        push({ variant: "info", title: `You're already connected with ${user.firstName}` });
+        // A request already exists (pending/handled) — that is NOT the same as
+        // being connected, so keep the button in its "requested" state and say so.
+        push({
+          variant: "info",
+          title: `A request already exists with ${user.firstName}`,
+        });
       } else {
         setSent((current) => ({ ...current, [user._id]: false }));
         push({ variant: "error", title: "Could not send request", body: message });
       }
     }
   };
+
+  // A just-sent request (optimistic) takes precedence over the fetched status.
+  const effectiveStatus = (user: SearchUser): RelationshipStatus =>
+    sent[user._id] ? "requested" : user.connectionStatus;
 
   const showResults = useMemo(() => query.trim().length >= 2, [query]);
 
@@ -108,14 +119,48 @@ export const UserSearch = () => {
                       : "Developer"}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void connect(user)}
-                  disabled={sent[user._id]}
-                  className="btn btn-primary btn-sm shrink-0"
-                >
-                  {sent[user._id] ? "Sent" : "Connect"}
-                </button>
+                {(() => {
+                  const status = effectiveStatus(user);
+                  if (status === "connected") {
+                    return (
+                      <span className="btn btn-ghost btn-sm no-animation shrink-0 cursor-default gap-1 text-success">
+                        <Icon name="check" className="h-4 w-4" />
+                        Connected
+                      </span>
+                    );
+                  }
+                  if (status === "requested") {
+                    return (
+                      <button
+                        type="button"
+                        disabled
+                        className="btn btn-sm shrink-0"
+                      >
+                        Requested
+                      </button>
+                    );
+                  }
+                  if (status === "incoming") {
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => navigate("/requests")}
+                        className="btn btn-secondary btn-sm shrink-0"
+                      >
+                        Respond
+                      </button>
+                    );
+                  }
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => void connect(user)}
+                      className="btn btn-primary btn-sm shrink-0"
+                    >
+                      Connect
+                    </button>
+                  );
+                })()}
               </div>
             ))
           )}

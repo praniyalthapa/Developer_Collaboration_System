@@ -17,6 +17,12 @@ export interface SafeUser {
   skills: string[];
 }
 
+export type RelationshipStatus = "none" | "connected" | "requested" | "incoming";
+
+export interface SearchUser extends SafeUser {
+  connectionStatus: RelationshipStatus;
+}
+
 export interface CurrentUser extends SafeUser {
   emailId: string;
   role: UserRole;

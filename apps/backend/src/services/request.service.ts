@@ -31,7 +31,12 @@ export const sendRequest = async (
     ],
   });
   if (existing) {
-    throw ApiError.conflict("A connection request already exists");
+    // A pending or accepted request is a live relationship — block a duplicate.
+    // A previously rejected/ignored one is stale, so clear it and start over.
+    if (existing.status === "interested" || existing.status === "accepted") {
+      throw ApiError.conflict("A connection request already exists");
+    }
+    await existing.deleteOne();
   }
 
   return ConnectionRequest.create({ fromUserId, toUserId, status });

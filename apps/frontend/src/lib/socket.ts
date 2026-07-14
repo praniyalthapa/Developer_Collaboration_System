@@ -21,6 +21,13 @@ export interface ServerToClientEvents {
   messagesDelivered: (payload: { withUserId: string }) => void;
   messagesRead: (payload: { withUserId: string }) => void;
   codeUpdate: (payload: { code: string; language?: string }) => void;
+  yjsSync: (payload: { update: number[] }) => void;
+  yjsUpdate: (payload: { update: number[] }) => void;
+  sessionChatMessage: (payload: {
+    userName: string;
+    text: string;
+    at: string;
+  }) => void;
   languageUpdate: (payload: { language: string }) => void;
   participantJoined: (payload: {
     userName: string;
@@ -58,6 +65,10 @@ export interface ServerToClientEvents {
   presenceState: (payload: { userIds: string[] }) => void;
   presenceOnline: (payload: { userId: string }) => void;
   presenceOffline: (payload: { userId: string }) => void;
+  connectionRequestReceived: (payload: {
+    fromUserId: string;
+    fromName: string;
+  }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -77,6 +88,12 @@ export interface ClientToServerEvents {
     userName: string;
   }) => void;
   codeChange: (payload: { sessionId: string; code: string }) => void;
+  yjsUpdate: (payload: { sessionId: string; update: number[] }) => void;
+  sessionChat: (payload: {
+    sessionId: string;
+    userName: string;
+    text: string;
+  }) => void;
   languageChange: (payload: { sessionId: string; language: string }) => void;
   userTyping: (payload: { sessionId: string; userName: string }) => void;
   userStoppedTyping: (payload: { sessionId: string }) => void;

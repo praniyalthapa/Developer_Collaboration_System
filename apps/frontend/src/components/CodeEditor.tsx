@@ -1,17 +1,23 @@
-import Editor, { type OnChange } from "@monaco-editor/react";
+import Editor, { type OnChange, type OnMount } from "@monaco-editor/react";
 
 interface CodeEditorProps {
-  value: string;
   language: string;
+  /**
+   * Controlled value. Omit in collaborative mode — the Yjs binding set up via
+   * `onMount` owns the model instead, and a controlled value would fight it.
+   */
+  value?: string;
   readOnly?: boolean;
   onChange?: (value: string) => void;
+  onMount?: OnMount;
 }
 
 export const CodeEditor = ({
-  value,
   language,
+  value,
   readOnly = false,
   onChange,
+  onMount,
 }: CodeEditorProps) => {
   const handleChange: OnChange = (next) => {
     if (!readOnly && onChange) {
@@ -25,6 +31,7 @@ export const CodeEditor = ({
       language={language}
       value={value}
       onChange={handleChange}
+      onMount={onMount}
       theme="vs-dark"
       options={{
         minimap: { enabled: false },

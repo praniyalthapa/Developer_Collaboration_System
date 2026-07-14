@@ -1,7 +1,10 @@
+import { useEffect } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAppDispatch, useAppSelector } from "../app/hooks";
 import { clearUser } from "../features/userSlice";
 import { clearFeed } from "../features/feedSlice";
+import { setRequests } from "../features/requestSlice";
+import { getReceivedRequests } from "../api/user.api";
 import { logout } from "../api/auth.api";
 import { Sidebar } from "./Sidebar";
 import { ThemeToggle } from "./ThemeToggle";
@@ -15,11 +18,21 @@ import { CallProvider } from "../context/CallProvider";
 
 export const DashboardLayout = () => {
   const user = useAppSelector((state) => state.user);
+  const pendingRequests = useAppSelector((state) => state.request?.length ?? 0);
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const items = NAV_ITEMS.filter(
     (item) => !item.adminOnly || user?.role === "admin",
   );
+
+  // Load the pending-request count once on entry so the Requests badge is
+  // correct app-wide, not only after visiting the Requests page.
+  useEffect(() => {
+    if (!user) return;
+    getReceivedRequests()
+      .then((data) => dispatch(setRequests(data)))
+      .catch(() => undefined);
+  }, [user, dispatch]);
 
   // Mirrors the sidebar's logout: the desktop sidebar is hidden below `lg`, so
   // without this the mobile header would leave no way to sign out.
@@ -39,6 +52,12 @@ export const DashboardLayout = () => {
     <CallProvider>
     <div className="min-h-screen lg:pl-64">
       <Sidebar />
+
+      {/* Desktop top bar: the mobile header below is lg:hidden and the sidebar
+          has no messages entry, so surface the chat/messages icon here too. */}
+      <header className="glass-strong sticky top-0 z-30 hidden h-16 items-center justify-end border-b border-base-content/10 px-10 lg:flex">
+        <ChatList />
+      </header>
 
       <header className="glass-strong sticky top-0 z-30 flex h-16 items-center justify-between border-b border-base-content/10 px-4 lg:hidden">
         <Link to="/" className="flex items-center gap-2 font-bold">
@@ -86,7 +105,14 @@ export const DashboardLayout = () => {
               }`
             }
           >
-            <Icon name={item.icon} className="h-5 w-5" />
+            <span className="relative">
+              <Icon name={item.icon} className="h-5 w-5" />
+              {item.to === "/requests" && pendingRequests > 0 ? (
+                <span className="badge badge-primary badge-xs absolute -right-2.5 -top-1.5">
+                  {pendingRequests > 9 ? "9+" : pendingRequests}
+                </span>
+              ) : null}
+            </span>
             {item.label}
           </NavLink>
         ))}

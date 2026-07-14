@@ -1,25 +1,38 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { listChats } from "../api/chat.api";
 
 export const ChatList = () => {
   const [unreadTotal, setUnreadTotal] = useState(0);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const refresh = useCallback(() => {
+    listChats()
+      .then((chats) =>
+        setUnreadTotal(chats.reduce((total, chat) => total + chat.unreadCount, 0)),
+      )
+      .catch(() => undefined);
+  }, []);
+
+  // Re-check the unread count on mount and whenever the route changes, so
+  // reading messages and moving around the app keeps the badge honest.
+  useEffect(() => {
+    refresh();
+  }, [refresh, location.pathname]);
 
   useEffect(() => {
-    let active = true;
-    listChats()
-      .then((chats) => {
-        if (!active) return;
-        setUnreadTotal(
-          chats.reduce((total, chat) => total + chat.unreadCount, 0),
-        );
-      })
-      .catch(() => undefined);
+    // A conversation was just read — give the server a beat to persist the
+    // read receipt, then refresh so the badge actually clears.
+    const onRead = () => window.setTimeout(refresh, 400);
+    const onFocus = () => refresh();
+    window.addEventListener("chat:read", onRead);
+    window.addEventListener("focus", onFocus);
     return () => {
-      active = false;
+      window.removeEventListener("chat:read", onRead);
+      window.removeEventListener("focus", onFocus);
     };
-  }, []);
+  }, [refresh]);
 
   return (
     <button

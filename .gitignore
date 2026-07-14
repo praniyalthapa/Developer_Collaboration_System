@@ -19,6 +19,9 @@ npm-debug.log*
 # Runtime data
 apps/backend/uploads/*
 !apps/backend/uploads/.gitkeep
+# Seeded demo avatars are committed so cloned/downloaded copies show them too.
+!apps/backend/uploads/aashish-neupane.jpg
+!apps/backend/uploads/bartika-rai.jpg
 
 # Editor / OS
 .DS_Store

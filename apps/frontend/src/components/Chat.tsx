@@ -96,8 +96,11 @@ export const Chat = ({ targetUser, onBack }: ChatProps) => {
     const activeSocket = createSocket();
     socketRef.current = activeSocket;
 
-    const markRead = () =>
+    const markRead = () => {
       activeSocket.emit("markRead", { userId: me, targetUserId: targetUser._id });
+      // Tell the global unread badge to refresh — the conversation is now read.
+      window.dispatchEvent(new Event("chat:read"));
+    };
 
     activeSocket.on("connect", () => {
       activeSocket.emit("joinChat", { userId: me, targetUserId: targetUser._id });

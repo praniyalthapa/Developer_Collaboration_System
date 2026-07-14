@@ -10,11 +10,24 @@ import {
   reviewRequest,
   sendRequest,
 } from "../services/request.service";
+import { getIo } from "../socket";
 
 export const send = async (req: Request, res: Response): Promise<void> => {
   const user = getAuthUser(req);
   const { status, toUserId } = sendRequestParamsSchema.parse(req.params);
   const data = await sendRequest(user._id, toUserId, status);
+
+  // "interested" is an actual connection request — ping the recipient in real
+  // time so it surfaces as a toast/badge wherever they are in the app.
+  if (status === "interested") {
+    getIo()
+      ?.to(`user:${toUserId}`)
+      .emit("connectionRequestReceived", {
+        fromUserId: user._id.toString(),
+        fromName: `${user.firstName} ${user.lastName ?? ""}`.trim(),
+      });
+  }
+
   res.status(201).json({ message: `Request marked as ${status}`, data });
 };
 
