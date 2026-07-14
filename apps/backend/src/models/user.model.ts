@@ -25,7 +25,6 @@ export interface IUser {
   age?: number;
   gender?: Gender;
   role: UserRole;
-  isPremium: boolean;
   membershipType?: string;
   isSeed: boolean;
   photoUrl: string;
@@ -64,7 +63,6 @@ const userSchema = new Schema<IUser>(
     age: { type: Number, min: 18 },
     gender: { type: String, enum: GENDERS },
     role: { type: String, enum: USER_ROLES, default: "user" },
-    isPremium: { type: Boolean, default: false },
     membershipType: { type: String },
     isSeed: { type: Boolean, default: false },
     photoUrl: {

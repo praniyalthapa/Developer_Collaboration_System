@@ -20,6 +20,13 @@ export const getConnections = async (): Promise<SafeUser[]> => {
   return unwrap(res.data);
 };
 
+export const searchUsers = async (query: string): Promise<SafeUser[]> => {
+  const res = await apiClient.get<{ data: SafeUser[] }>("/user/search", {
+    params: { q: query },
+  });
+  return unwrap(res.data);
+};
+
 export const getReceivedRequests = async (): Promise<ReceivedRequest[]> => {
   const res = await apiClient.get<{ data: ReceivedRequest[] }>(
     "/user/requests/received",

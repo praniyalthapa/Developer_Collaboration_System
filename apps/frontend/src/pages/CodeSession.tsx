@@ -30,7 +30,7 @@ const CodeSession = () => {
   const typingTimer = useRef<number | null>(null);
 
   const userName = user ? `${user.firstName} ${user.lastName ?? ""}`.trim() : "";
-  const call = useCall(socket, sessionId ?? "", userName);
+  const call = useCall(socket, userName);
 
   useEffect(() => {
     if (!sessionId) return undefined;
@@ -169,7 +169,7 @@ const CodeSession = () => {
         </div>
 
         <aside className="flex flex-col gap-3 overflow-auto">
-          <CallPanel call={call} />
+          <CallPanel call={call} room={sessionId ?? ""} />
           <div className="surface flex flex-col gap-3 p-4">
           <h2 className="font-semibold">Participants ({participants.length})</h2>
           {participants.length === 0 ? (

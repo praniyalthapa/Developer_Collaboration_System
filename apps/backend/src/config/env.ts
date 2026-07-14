@@ -46,6 +46,12 @@ const envSchema = z.object({
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+
+  // TURN relay for video calls across NATs. We use Metered's hosted TURN:
+  // the backend fetches short-lived credentials from their API so the key is
+  // never shipped to the browser. Swap these to move to a fresh free account.
+  METERED_DOMAIN: z.string().optional(),
+  METERED_API_KEY: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -68,3 +74,4 @@ export const paymentsEnabled =
   env.PAYMENTS_ENABLED && Boolean(env.RAZORPAY_KEY_ID) && Boolean(env.RAZORPAY_KEY_SECRET);
 export const smtpEnabled = Boolean(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS);
 export const codeExecutionEnabled = env.CODE_EXECUTION_ENABLED;
+export const turnEnabled = Boolean(env.METERED_DOMAIN && env.METERED_API_KEY);

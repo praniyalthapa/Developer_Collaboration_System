@@ -1,5 +1,8 @@
-import { Link, NavLink, Outlet } from "react-router-dom";
-import { useAppSelector } from "../app/hooks";
+import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useAppDispatch, useAppSelector } from "../app/hooks";
+import { clearUser } from "../features/userSlice";
+import { clearFeed } from "../features/feedSlice";
+import { logout } from "../api/auth.api";
 import { Sidebar } from "./Sidebar";
 import { ThemeToggle } from "./ThemeToggle";
 import { ChatList } from "./ChatList";
@@ -7,15 +10,33 @@ import { Avatar } from "./Avatar";
 import { Icon } from "./icons";
 import { NAV_ITEMS } from "./navConfig";
 import { PresenceProvider } from "../context/PresenceProvider";
+import { ToastProvider } from "../context/ToastProvider";
+import { CallProvider } from "../context/CallProvider";
 
 export const DashboardLayout = () => {
   const user = useAppSelector((state) => state.user);
+  const dispatch = useAppDispatch();
+  const navigate = useNavigate();
   const items = NAV_ITEMS.filter(
     (item) => !item.adminOnly || user?.role === "admin",
   );
 
+  // Mirrors the sidebar's logout: the desktop sidebar is hidden below `lg`, so
+  // without this the mobile header would leave no way to sign out.
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      dispatch(clearUser());
+      dispatch(clearFeed());
+      navigate("/login");
+    }
+  };
+
   return (
+    <ToastProvider>
     <PresenceProvider>
+    <CallProvider>
     <div className="min-h-screen lg:pl-64">
       <Sidebar />
 
@@ -38,6 +59,15 @@ export const DashboardLayout = () => {
               className="ring-2 ring-primary/25"
             />
           </Link>
+          <button
+            type="button"
+            onClick={handleLogout}
+            title="Log out"
+            aria-label="Log out"
+            className="btn btn-ghost btn-circle btn-sm text-base-content/60 hover:bg-error/10 hover:text-error"
+          >
+            <Icon name="logout" className="h-5 w-5" />
+          </button>
         </div>
       </header>
 
@@ -62,6 +92,8 @@ export const DashboardLayout = () => {
         ))}
       </nav>
     </div>
+    </CallProvider>
     </PresenceProvider>
+    </ToastProvider>
   );
 };

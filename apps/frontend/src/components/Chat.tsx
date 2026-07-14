@@ -6,12 +6,13 @@ import { createCodeSession } from "../api/codeSession.api";
 import { createSocket, type AppSocket } from "../lib/socket";
 import { getErrorMessage } from "../lib/apiClient";
 import { formatTime } from "../lib/format";
-import { useCall } from "../hooks/useCall";
+import { setActiveChat } from "../lib/activeChat";
+import { clearUnreadTitle } from "../lib/notify";
 import { Avatar } from "./Avatar";
-import { VideoTile } from "./VideoTile";
 import { InlineLoader } from "./ui/Loader";
 import { Icon } from "./icons";
 import { useIsOnline } from "../context/presenceStore";
+import { useCallContext } from "../context/callStore";
 import type { ChatMessage, SafeUser } from "../types/models";
 
 interface ChatProps {
@@ -22,54 +23,56 @@ interface ChatProps {
 const getSenderId = (message: ChatMessage): string =>
   typeof message.senderId === "string" ? message.senderId : message.senderId._id;
 
-const CallControl = ({
-  active,
-  danger,
-  onClick,
-  label,
-  children,
-}: {
-  active?: boolean;
-  danger?: boolean;
-  onClick: () => void;
-  label: string;
-  children: React.ReactNode;
-}) => (
-  <button
-    type="button"
-    onClick={onClick}
-    title={label}
-    aria-label={label}
-    className={`btn btn-circle btn-sm ${
-      danger
-        ? "border-error/30 bg-error/15 text-error hover:bg-error/25"
-        : active
-          ? "border-primary/40 bg-primary/20 text-primary"
-          : "border-base-content/15 bg-base-100/60 text-base-content/70"
-    }`}
-  >
-    {children}
-  </button>
+const Check = () => (
+  <svg viewBox="0 0 14 10" className="h-2.5 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1 5l3.5 3.5L13 1" />
+  </svg>
 );
+
+// WhatsApp-style ticks for our own messages: one tick = sent (recipient
+// offline), two grey ticks = delivered, two blue ticks = read.
+const MessageTicks = ({ status }: { status?: ChatMessage["status"] }) => {
+  if (!status) return null;
+  const title = status === "read" ? "Read" : status === "delivered" ? "Delivered" : "Sent";
+  const color = status === "read" ? "text-sky-300" : "text-primary-content/60";
+  return (
+    <span className={`inline-flex items-center ${color}`} title={title} aria-label={title}>
+      <Check />
+      {status !== "sent" ? (
+        <span className="-ml-[7px]">
+          <Check />
+        </span>
+      ) : null}
+    </span>
+  );
+};
 
 export const Chat = ({ targetUser, onBack }: ChatProps) => {
   const currentUser = useAppSelector((state) => state.user);
   const online = useIsOnline(targetUser._id);
   const navigate = useNavigate();
+  const callCtx = useCallContext();
+  const inCallWithTarget =
+    callCtx.peer?.userId === targetUser._id &&
+    (callCtx.status === "outgoing" || callCtx.status === "active");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
-  const [socket, setSocket] = useState<AppSocket | null>(null);
   const socketRef = useRef<AppSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  const userName = currentUser
-    ? `${currentUser.firstName} ${currentUser.lastName ?? ""}`.trim()
-    : "";
-  const callRoom = currentUser
-    ? [currentUser._id, targetUser._id].sort().join("::")
-    : "";
-  const call = useCall(socket, callRoom, userName);
+  const startCall = () =>
+    callCtx.startCall({
+      userId: targetUser._id,
+      name: `${targetUser.firstName} ${targetUser.lastName ?? ""}`.trim(),
+      photoUrl: targetUser.photoUrl,
+    });
+
+  useEffect(() => {
+    setActiveChat(targetUser._id);
+    clearUnreadTitle();
+    return () => setActiveChat(null);
+  }, [targetUser._id]);
 
   useEffect(() => {
     let active = true;
@@ -89,37 +92,81 @@ export const Chat = ({ targetUser, onBack }: ChatProps) => {
 
   useEffect(() => {
     if (!currentUser) return undefined;
+    const me = currentUser._id;
     const activeSocket = createSocket();
     socketRef.current = activeSocket;
-    setSocket(activeSocket);
+
+    const markRead = () =>
+      activeSocket.emit("markRead", { userId: me, targetUserId: targetUser._id });
 
     activeSocket.on("connect", () => {
-      activeSocket.emit("joinChat", {
-        userId: currentUser._id,
-        targetUserId: targetUser._id,
-      });
+      activeSocket.emit("joinChat", { userId: me, targetUserId: targetUser._id });
+      // Join our own user room so delivered/read receipts for our sent
+      // messages reach this socket.
+      activeSocket.emit("presenceJoin", { userId: me });
+      markRead();
     });
+
     activeSocket.on("messageReceived", (payload) => {
-      if (payload.senderId === currentUser._id) return;
+      if (payload.senderId === me) {
+        // Reconcile our optimistic message with the server id + status.
+        setMessages((previous) =>
+          previous.map((message) =>
+            message.clientId && message.clientId === payload.clientId
+              ? { ...message, _id: payload._id, status: payload.status, clientId: undefined }
+              : message,
+          ),
+        );
+        return;
+      }
       setMessages((previous) => [
         ...previous,
         {
+          _id: payload._id,
           senderId: {
             _id: payload.senderId,
             firstName: payload.firstName,
             lastName: payload.lastName,
           },
           text: payload.text,
+          status: payload.status,
           createdAt: payload.createdAt,
         },
       ]);
+      // We're looking at this conversation, so the message is read right away.
+      markRead();
+    });
+
+    // Our sent messages became delivered (recipient came online / was online).
+    activeSocket.on("messagesDelivered", ({ withUserId }) => {
+      if (withUserId !== targetUser._id) return;
+      setMessages((previous) =>
+        previous.map((message) =>
+          getSenderId(message) === me && message.status === "sent"
+            ? { ...message, status: "delivered" }
+            : message,
+        ),
+      );
+    });
+
+    // Recipient opened the chat — our sent messages are now read (blue ticks).
+    activeSocket.on("messagesRead", ({ withUserId }) => {
+      if (withUserId !== targetUser._id) return;
+      setMessages((previous) =>
+        previous.map((message) =>
+          getSenderId(message) === me && message.status !== "read"
+            ? { ...message, status: "read" }
+            : message,
+        ),
+      );
     });
 
     return () => {
       activeSocket.off("messageReceived");
+      activeSocket.off("messagesDelivered");
+      activeSocket.off("messagesRead");
       activeSocket.disconnect();
       socketRef.current = null;
-      setSocket(null);
     };
   }, [currentUser, targetUser._id]);
 
@@ -131,22 +178,26 @@ export const Chat = ({ targetUser, onBack }: ChatProps) => {
     event.preventDefault();
     const text = draft.trim();
     if (!text || !currentUser || !socketRef.current) return;
+    const clientId = crypto.randomUUID();
     socketRef.current.emit("sendMessage", {
       firstName: currentUser.firstName,
       lastName: currentUser.lastName,
       userId: currentUser._id,
       targetUserId: targetUser._id,
       text,
+      clientId,
     });
     setMessages((previous) => [
       ...previous,
       {
+        clientId,
         senderId: {
           _id: currentUser._id,
           firstName: currentUser.firstName,
           lastName: currentUser.lastName,
         },
         text,
+        status: "sent",
         createdAt: new Date().toISOString(),
       },
     ]);
@@ -161,8 +212,6 @@ export const Chat = ({ targetUser, onBack }: ChatProps) => {
       alert(getErrorMessage(error, "Could not start a coding session"));
     }
   };
-
-  const remotes = Object.entries(call.remotePeers);
 
   return (
     <div className="surface flex h-[calc(100vh-9rem)] flex-col lg:h-[72vh]">
@@ -192,7 +241,7 @@ export const Chat = ({ targetUser, onBack }: ChatProps) => {
             </h3>
             <p className="flex items-center gap-1.5 font-mono text-[11px] text-base-content/50">
               {online ? <span className="h-1.5 w-1.5 rounded-full bg-success" /> : null}
-              {call.inCall ? "in call" : online ? "online" : "offline"}
+              {inCallWithTarget ? "in call" : online ? "online" : "offline"}
             </p>
           </div>
         </div>
@@ -207,10 +256,10 @@ export const Chat = ({ targetUser, onBack }: ChatProps) => {
             <Icon name="code" className="h-4 w-4" />
             <span className="hidden sm:inline">Code together</span>
           </button>
-          {call.inCall ? (
+          {inCallWithTarget ? (
             <button
               type="button"
-              onClick={call.leaveCall}
+              onClick={callCtx.hangUp}
               className="btn btn-sm gap-1.5 border-error/30 bg-error/15 text-error hover:bg-error/25"
               title="End call"
             >
@@ -223,9 +272,14 @@ export const Chat = ({ targetUser, onBack }: ChatProps) => {
           ) : (
             <button
               type="button"
-              onClick={() => void call.joinCall()}
+              onClick={startCall}
+              disabled={callCtx.status !== "idle"}
               className="btn btn-primary btn-sm gap-1.5"
-              title="Start a video call"
+              title={
+                callCtx.status !== "idle"
+                  ? "You're already in a call"
+                  : "Start a video call"
+              }
             >
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M23 7l-7 5 7 5V7z" />
@@ -236,50 +290,6 @@ export const Chat = ({ targetUser, onBack }: ChatProps) => {
           )}
         </div>
       </div>
-
-      {call.inCall ? (
-        <div className="border-b border-base-content/10 bg-base-200/60 p-3">
-          {call.error ? (
-            <p className="mb-2 text-xs text-error">{call.error}</p>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-2">
-            {remotes.length === 0 ? (
-              <p className="font-mono text-xs text-base-content/55">
-                Waiting for {targetUser.firstName} to join the call...
-              </p>
-            ) : (
-              remotes.map(([id, peer]) => (
-                <div key={id} className="w-44">
-                  <VideoTile stream={peer.stream} label={peer.userName} placeholder="connecting..." />
-                </div>
-              ))
-            )}
-            <div className="w-32">
-              <VideoTile stream={call.localStream} label="You" muted placeholder="camera off" />
-            </div>
-            <div className="ml-auto flex items-center gap-1.5">
-              <CallControl active={call.micOn} onClick={call.toggleMic} label="Toggle mic">
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="9" y="2" width="6" height="12" rx="3" />
-                  <path d="M5 10a7 7 0 0 0 14 0M12 17v4" />
-                </svg>
-              </CallControl>
-              <CallControl active={call.camOn} onClick={call.toggleCam} label="Toggle camera">
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M23 7l-7 5 7 5V7z" />
-                  <rect x="1" y="5" width="15" height="14" rx="2" />
-                </svg>
-              </CallControl>
-              <CallControl active={call.sharing} onClick={() => void call.toggleScreenShare()} label="Share screen">
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="2" y="3" width="20" height="14" rx="2" />
-                  <path d="M8 21h8M12 17v4" />
-                </svg>
-              </CallControl>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
         {loading ? (
@@ -295,7 +305,7 @@ export const Chat = ({ targetUser, onBack }: ChatProps) => {
               : false;
             return (
               <div
-                key={message._id ?? index}
+                key={message._id ?? message.clientId ?? index}
                 className={`flex ${mine ? "justify-end" : "justify-start"}`}
               >
                 <div
@@ -306,8 +316,9 @@ export const Chat = ({ targetUser, onBack }: ChatProps) => {
                   }`}
                 >
                   <p className="break-words text-sm">{message.text}</p>
-                  <p className="mt-1 text-right text-[10px] opacity-70">
-                    {formatTime(message.createdAt)}
+                  <p className="mt-1 flex items-center justify-end gap-1 text-[10px] opacity-70">
+                    <span>{formatTime(message.createdAt)}</span>
+                    {mine ? <MessageTicks status={message.status} /> : null}
                   </p>
                 </div>
               </div>

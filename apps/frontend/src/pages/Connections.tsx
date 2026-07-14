@@ -4,6 +4,7 @@ import { setConnections } from "../features/connectionSlice";
 import { getConnections } from "../api/user.api";
 import { listChats } from "../api/chat.api";
 import { timeAgo } from "../lib/format";
+import { getActiveChat } from "../lib/activeChat";
 import { Avatar } from "../components/Avatar";
 import { Chat } from "../components/Chat";
 import { PageHeader } from "../components/PageHeader";
@@ -51,6 +52,33 @@ const Connections = () => {
     };
   }, [dispatch]);
 
+  // Live inbox updates: when a message arrives, update that conversation's
+  // preview + unread count so the list can reorder without a refetch.
+  useEffect(() => {
+    const onMessage = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ fromUserId: string; text: string; createdAt: string }>
+      ).detail;
+      if (!detail) return;
+      const { fromUserId, text, createdAt } = detail;
+      setChatMap((current) => {
+        const existing = current[fromUserId];
+        const viewing = getActiveChat() === fromUserId;
+        return {
+          ...current,
+          [fromUserId]: {
+            _id: existing?._id ?? fromUserId,
+            participant: existing?.participant ?? null,
+            latestMessage: { _id: `${createdAt}-${fromUserId}`, text, createdAt, senderId: fromUserId },
+            unreadCount: viewing ? 0 : (existing?.unreadCount ?? 0) + 1,
+          },
+        };
+      });
+    };
+    window.addEventListener("dc:message", onMessage);
+    return () => window.removeEventListener("dc:message", onMessage);
+  }, []);
+
   const totalUnread = useMemo(
     () => Object.values(chatMap).reduce((sum, chat) => sum + chat.unreadCount, 0),
     [chatMap],
@@ -59,13 +87,21 @@ const Connections = () => {
   const filtered = useMemo(() => {
     if (!connections) return [];
     const q = query.trim().toLowerCase();
-    if (!q) return connections;
-    return connections.filter(
-      (c) =>
-        `${c.firstName} ${c.lastName ?? ""}`.toLowerCase().includes(q) ||
-        c.skills.some((skill) => skill.toLowerCase().includes(q)),
-    );
-  }, [connections, query]);
+    const matches = !q
+      ? connections
+      : connections.filter(
+          (c) =>
+            `${c.firstName} ${c.lastName ?? ""}`.toLowerCase().includes(q) ||
+            c.skills.some((skill) => skill.toLowerCase().includes(q)),
+        );
+    // Messenger-style: most recent conversation first; connections with no
+    // messages fall to the bottom in their existing order (stable sort).
+    const lastActivity = (id: string) => {
+      const at = chatMap[id]?.latestMessage?.createdAt;
+      return at ? new Date(at).getTime() : 0;
+    };
+    return [...matches].sort((a, b) => lastActivity(b._id) - lastActivity(a._id));
+  }, [connections, query, chatMap]);
 
   const selectConnection = (connection: SafeUser) => {
     setChatMap((current) => {

@@ -61,6 +61,25 @@ export const getConnections = async (
   );
 };
 
+export const searchUsers = async (
+  userId: Types.ObjectId,
+  query: string,
+): Promise<SafeUser[]> => {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(escaped, "i");
+
+  return User.find({
+    _id: { $ne: userId },
+    $or: [{ firstName: regex }, { lastName: regex }, { skills: regex }],
+  })
+    .select(USER_SAFE_FIELDS)
+    .limit(10)
+    .lean<SafeUser[]>();
+};
+
 export const getFeed = async (
   userId: Types.ObjectId,
   pagination: Pagination,

@@ -8,7 +8,7 @@ import type { UserRole } from "../types/enums";
 import type { AdminUsersQuery } from "../validators/admin.schema";
 
 const ADMIN_USER_FIELDS =
-  "firstName lastName emailId role isPremium isSeed authProvider createdAt";
+  "firstName lastName emailId role isSeed authProvider createdAt";
 
 export interface AdminUserView {
   _id: Types.ObjectId;
@@ -16,7 +16,6 @@ export interface AdminUserView {
   lastName?: string;
   emailId: string;
   role: UserRole;
-  isPremium: boolean;
   isSeed: boolean;
   authProvider: string;
   createdAt: Date;
@@ -67,7 +66,6 @@ export const listUsers = async (
 export interface AdminStats {
   totalUsers: number;
   admins: number;
-  premiumUsers: number;
   acceptedConnections: number;
   pendingRequests: number;
   activeChats: number;
@@ -78,7 +76,6 @@ export const getStats = async (): Promise<AdminStats> => {
   const [
     totalUsers,
     admins,
-    premiumUsers,
     acceptedConnections,
     pendingRequests,
     activeChats,
@@ -86,7 +83,6 @@ export const getStats = async (): Promise<AdminStats> => {
   ] = await Promise.all([
     User.countDocuments({}),
     User.countDocuments({ role: "admin" }),
-    User.countDocuments({ isPremium: true }),
     ConnectionRequest.countDocuments({ status: "accepted" }),
     ConnectionRequest.countDocuments({ status: "interested" }),
     Chat.countDocuments({}),
@@ -96,7 +92,6 @@ export const getStats = async (): Promise<AdminStats> => {
   return {
     totalUsers,
     admins,
-    premiumUsers,
     acceptedConnections,
     pendingRequests,
     activeChats,

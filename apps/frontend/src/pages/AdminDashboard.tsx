@@ -98,10 +98,6 @@ const AdminDashboard = () => {
     }
   };
 
-  const premiumRatio = stats && stats.totalUsers > 0
-    ? Math.round((stats.premiumUsers / stats.totalUsers) * 100)
-    : 0;
-
   return (
     <>
       <PageHeader
@@ -126,23 +122,10 @@ const AdminDashboard = () => {
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <StatTile label="Total users" value={stats.totalUsers} icon="users" />
                 <StatTile label="Admins" value={stats.admins} icon="shield" />
-                <StatTile label="Premium" value={stats.premiumUsers} icon="crown" />
                 <StatTile label="Connections" value={stats.acceptedConnections} icon="activity" />
                 <StatTile label="Pending requests" value={stats.pendingRequests} icon="inbox" />
                 <StatTile label="Conversations" value={stats.activeChats} icon="message" />
                 <StatTile label="Code sessions" value={stats.codeSessions} icon="code" />
-                <div className="stat-tile">
-                  <p className="relative font-mono text-xs uppercase tracking-wider text-base-content/55">
-                    Premium adoption
-                  </p>
-                  <p className="relative mt-1 text-3xl font-extrabold">{premiumRatio}%</p>
-                  <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-base-content/10">
-                    <div
-                      className="h-full rounded-full bg-indigo-600"
-                      style={{ width: `${premiumRatio}%` }}
-                    />
-                  </div>
-                </div>
               </div>
             </>
           ) : null}
@@ -209,7 +192,7 @@ const AdminDashboard = () => {
                           </span>
                         </td>
                         <td className="font-mono text-xs text-base-content/60">
-                          {target.isPremium ? "Premium" : "Free"}
+                          {target.authProvider}
                           {target.isSeed ? " · demo" : ""}
                         </td>
                         <td className="text-right">

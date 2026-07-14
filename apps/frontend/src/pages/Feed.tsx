@@ -6,6 +6,7 @@ import { getFeed } from "../api/user.api";
 import { sendRequest } from "../api/request.api";
 import { getErrorMessage } from "../lib/apiClient";
 import { SwipeDeck } from "../components/SwipeDeck";
+import { UserSearch } from "../components/UserSearch";
 import { FullScreenLoader } from "../components/ui/Loader";
 import { EmptyState } from "../components/ui/EmptyState";
 import type { FeedUser } from "../types/models";
@@ -95,15 +96,19 @@ const Feed = () => {
 
   if (!feed || feed.length === 0) {
     return (
-      <EmptyState
-        title="You're all caught up"
-        description="No more matches right now. Add skills to your profile to surface more developers."
-      />
+      <div className="mx-auto max-w-2xl space-y-6">
+        <UserSearch />
+        <EmptyState
+          title="You're all caught up"
+          description="No more matches right now. Search for someone by name above, or add skills to your profile to surface more developers."
+        />
+      </div>
     );
   }
 
   return (
     <div className="mx-auto max-w-2xl space-y-8">
+      <UserSearch />
       <div className="text-center">
         <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
           Discover <span className="gradient-text">developers</span>

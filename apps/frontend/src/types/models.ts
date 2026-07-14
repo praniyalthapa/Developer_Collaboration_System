@@ -20,7 +20,6 @@ export interface SafeUser {
 export interface CurrentUser extends SafeUser {
   emailId: string;
   role: UserRole;
-  isPremium: boolean;
   membershipType?: string;
   authProvider: "local" | "google";
   createdAt: string;
@@ -59,11 +58,15 @@ export interface MessageSender {
   photoUrl?: string;
 }
 
+export type MessageStatus = "sent" | "delivered" | "read";
+
 export interface ChatMessage {
   _id?: string;
   senderId: MessageSender | string;
   text: string;
+  status?: MessageStatus;
   createdAt: string;
+  clientId?: string;
 }
 
 export interface Chat {
@@ -96,7 +99,6 @@ export interface AdminUser {
   lastName?: string;
   emailId: string;
   role: UserRole;
-  isPremium: boolean;
   isSeed: boolean;
   authProvider: string;
   createdAt: string;
@@ -105,7 +107,6 @@ export interface AdminUser {
 export interface AdminStats {
   totalUsers: number;
   admins: number;
-  premiumUsers: number;
   acceptedConnections: number;
   pendingRequests: number;
   activeChats: number;

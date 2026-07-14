@@ -31,6 +31,7 @@ interface SendMessagePayload {
   userId: string;
   targetUserId: string;
   text: string;
+  clientId?: string;
 }
 
 interface JoinCodeSessionPayload {
@@ -53,17 +54,35 @@ interface ClientToServerEvents {
   callSignalOffer: (payload: { to: string; sdp: unknown }) => void;
   callSignalAnswer: (payload: { to: string; sdp: unknown }) => void;
   callSignalIce: (payload: { to: string; candidate: unknown }) => void;
+  callInvite: (payload: {
+    toUserId: string;
+    room: string;
+    fromUserId: string;
+    fromName: string;
+  }) => void;
+  callInviteResponse: (payload: {
+    toUserId: string;
+    room: string;
+    accepted: boolean;
+  }) => void;
+  callCancel: (payload: { toUserId: string; room: string }) => void;
   presenceJoin: (payload: { userId: string }) => void;
+  markRead: (payload: { userId: string; targetUserId: string }) => void;
 }
 
 interface ServerToClientEvents {
   messageReceived: (payload: {
+    _id: string;
     firstName: string;
     lastName?: string;
     text: string;
     senderId: string;
+    status: "sent" | "delivered" | "read";
+    clientId?: string;
     createdAt: Date;
   }) => void;
+  messagesDelivered: (payload: { withUserId: string }) => void;
+  messagesRead: (payload: { withUserId: string }) => void;
   codeUpdate: (payload: { code: string; language?: string }) => void;
   languageUpdate: (payload: { language: string }) => void;
   participantJoined: (payload: {
@@ -83,6 +102,20 @@ interface ServerToClientEvents {
   callOffer: (payload: { from: string; sdp: unknown }) => void;
   callAnswer: (payload: { from: string; sdp: unknown }) => void;
   callIce: (payload: { from: string; candidate: unknown }) => void;
+  callIncoming: (payload: {
+    room: string;
+    fromUserId: string;
+    fromName: string;
+  }) => void;
+  callAccepted: (payload: { room: string }) => void;
+  callDeclined: (payload: { room: string }) => void;
+  callCancelled: (payload: { room: string }) => void;
+  messageNotification: (payload: {
+    fromUserId: string;
+    fromName: string;
+    text: string;
+    createdAt: Date;
+  }) => void;
   presenceState: (payload: { userIds: string[] }) => void;
   presenceOnline: (payload: { userId: string }) => void;
   presenceOffline: (payload: { userId: string }) => void;
@@ -103,6 +136,9 @@ export const initializeSocket = (
   const onlineUsers = new Map<string, Set<string>>();
   const socketToUser = new Map<string, string>();
 
+  const isOnline = (userId: string): boolean =>
+    (onlineUsers.get(userId)?.size ?? 0) > 0;
+
   const leaveCall = (socketId: string, sessionId: string): void => {
     const room = callRooms.get(sessionId);
     if (!room || !room.has(socketId)) return;
@@ -122,7 +158,7 @@ export const initializeSocket = (
 
     socket.on(
       "sendMessage",
-      async ({ firstName, lastName, userId, targetUserId, text }) => {
+      async ({ firstName, lastName, userId, targetUserId, text, clientId }) => {
         const trimmed = text?.trim();
         if (!trimmed) return;
         try {
@@ -136,24 +172,67 @@ export const initializeSocket = (
               messages: [],
             });
           }
+          // If the recipient is connected anywhere in the app, the message is
+          // "delivered"; otherwise it's just "sent" until they come online.
+          const status = isOnline(targetUserId) ? "delivered" : "sent";
           chat.messages.push({
             senderId: new Types.ObjectId(userId),
             text: trimmed,
+            status,
           });
           await chat.save();
+          const saved = chat.messages[chat.messages.length - 1];
 
           io.to(roomId).emit("messageReceived", {
+            _id: saved._id.toString(),
             firstName,
             lastName,
             text: trimmed,
             senderId: userId,
-            createdAt: new Date(),
+            status,
+            clientId,
+            createdAt: saved.createdAt,
+          });
+
+          // Notify the recipient's global socket (for toasts/badges) even when
+          // they don't currently have this conversation open.
+          io.to(`user:${targetUserId}`).emit("messageNotification", {
+            fromUserId: userId,
+            fromName: `${firstName} ${lastName ?? ""}`.trim(),
+            text: trimmed,
+            createdAt: saved.createdAt,
           });
         } catch (error) {
           logger.error("Socket sendMessage failed", error);
         }
       },
     );
+
+    // The reader (userId) opened a conversation with targetUserId, so every
+    // message targetUserId sent them is now "read". Tell the sender so their
+    // ticks turn blue.
+    socket.on("markRead", async ({ userId, targetUserId }) => {
+      try {
+        const chat = await Chat.findOne({
+          participants: { $all: [userId, targetUserId] },
+        });
+        if (!chat) return;
+        let changed = false;
+        for (const message of chat.messages) {
+          if (!message.senderId.equals(userId) && message.status !== "read") {
+            message.status = "read";
+            changed = true;
+          }
+        }
+        chat.lastSeen.set(userId, new Date());
+        await chat.save();
+        if (changed) {
+          io.to(`user:${targetUserId}`).emit("messagesRead", { withUserId: userId });
+        }
+      } catch (error) {
+        logger.error("Socket markRead failed", error);
+      }
+    });
 
     socket.on("joinCodeSession", async ({ sessionId, userId, userName }) => {
       try {
@@ -273,8 +352,9 @@ export const initializeSocket = (
       }
     });
 
-    socket.on("presenceJoin", ({ userId }) => {
+    socket.on("presenceJoin", async ({ userId }) => {
       socketToUser.set(socket.id, userId);
+      socket.join(`user:${userId}`);
       let sockets = onlineUsers.get(userId);
       const wasOffline = !sockets || sockets.size === 0;
       if (!sockets) {
@@ -285,6 +365,33 @@ export const initializeSocket = (
       socket.emit("presenceState", { userIds: Array.from(onlineUsers.keys()) });
       if (wasOffline) {
         socket.broadcast.emit("presenceOnline", { userId });
+        // This user just came online: any messages still "sent" to them are now
+        // "delivered" — flip them and notify each sender so ticks go double.
+        try {
+          const chats = await Chat.find({
+            participants: userId,
+            "messages.status": "sent",
+          });
+          for (const chat of chats) {
+            const other = chat.participants.find((p) => !p.equals(userId));
+            if (!other) continue;
+            let changed = false;
+            for (const message of chat.messages) {
+              if (message.status === "sent" && !message.senderId.equals(userId)) {
+                message.status = "delivered";
+                changed = true;
+              }
+            }
+            if (changed) {
+              await chat.save();
+              io.to(`user:${other.toString()}`).emit("messagesDelivered", {
+                withUserId: userId,
+              });
+            }
+          }
+        } catch (error) {
+          logger.error("Socket deliver-on-presence failed", error);
+        }
       }
     });
 
@@ -298,6 +405,25 @@ export const initializeSocket = (
     socket.on("callSignalIce", ({ to, candidate }) =>
       io.to(to).emit("callIce", { from: socket.id, candidate }),
     );
+
+    // Ringing / invitation layer (routed by userId, not socketId, so the
+    // callee is reached wherever they are in the app).
+    socket.on("callInvite", ({ toUserId, room, fromUserId, fromName }) => {
+      io.to(`user:${toUserId}`).emit("callIncoming", {
+        room,
+        fromUserId,
+        fromName,
+      });
+    });
+    socket.on("callInviteResponse", ({ toUserId, room, accepted }) => {
+      io.to(`user:${toUserId}`).emit(
+        accepted ? "callAccepted" : "callDeclined",
+        { room },
+      );
+    });
+    socket.on("callCancel", ({ toUserId, room }) => {
+      io.to(`user:${toUserId}`).emit("callCancelled", { room });
+    });
 
     socket.on("disconnect", () => {
       for (const sessionId of activeSessions.keys()) {

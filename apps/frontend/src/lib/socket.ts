@@ -9,12 +9,17 @@ export interface Participant {
 
 export interface ServerToClientEvents {
   messageReceived: (payload: {
+    _id: string;
     firstName: string;
     lastName?: string;
     text: string;
     senderId: string;
+    status: "sent" | "delivered" | "read";
+    clientId?: string;
     createdAt: string;
   }) => void;
+  messagesDelivered: (payload: { withUserId: string }) => void;
+  messagesRead: (payload: { withUserId: string }) => void;
   codeUpdate: (payload: { code: string; language?: string }) => void;
   languageUpdate: (payload: { language: string }) => void;
   participantJoined: (payload: {
@@ -36,6 +41,20 @@ export interface ServerToClientEvents {
   callOffer: (payload: { from: string; sdp: RTCSessionDescriptionInit }) => void;
   callAnswer: (payload: { from: string; sdp: RTCSessionDescriptionInit }) => void;
   callIce: (payload: { from: string; candidate: RTCIceCandidateInit }) => void;
+  callIncoming: (payload: {
+    room: string;
+    fromUserId: string;
+    fromName: string;
+  }) => void;
+  callAccepted: (payload: { room: string }) => void;
+  callDeclined: (payload: { room: string }) => void;
+  callCancelled: (payload: { room: string }) => void;
+  messageNotification: (payload: {
+    fromUserId: string;
+    fromName: string;
+    text: string;
+    createdAt: string;
+  }) => void;
   presenceState: (payload: { userIds: string[] }) => void;
   presenceOnline: (payload: { userId: string }) => void;
   presenceOffline: (payload: { userId: string }) => void;
@@ -49,7 +68,9 @@ export interface ClientToServerEvents {
     userId: string;
     targetUserId: string;
     text: string;
+    clientId?: string;
   }) => void;
+  markRead: (payload: { userId: string; targetUserId: string }) => void;
   joinCodeSession: (payload: {
     sessionId: string;
     userId: string;
@@ -65,6 +86,18 @@ export interface ClientToServerEvents {
   callSignalOffer: (payload: { to: string; sdp: RTCSessionDescriptionInit }) => void;
   callSignalAnswer: (payload: { to: string; sdp: RTCSessionDescriptionInit }) => void;
   callSignalIce: (payload: { to: string; candidate: RTCIceCandidateInit }) => void;
+  callInvite: (payload: {
+    toUserId: string;
+    room: string;
+    fromUserId: string;
+    fromName: string;
+  }) => void;
+  callInviteResponse: (payload: {
+    toUserId: string;
+    room: string;
+    accepted: boolean;
+  }) => void;
+  callCancel: (payload: { toUserId: string; room: string }) => void;
   presenceJoin: (payload: { userId: string }) => void;
 }
 

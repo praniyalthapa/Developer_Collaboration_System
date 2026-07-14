@@ -1,10 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { apiClient } from "../lib/apiClient";
 import type { AppSocket } from "../lib/socket";
 
-const ICE_SERVERS: RTCIceServer[] = [
+// STUN is the baseline and is ALWAYS tried first: ICE ranks direct/STUN
+// candidates above TURN, so a relay is only used when a direct peer-to-peer
+// path can't be formed. These plain STUN servers are the offline fallback used
+// if the backend's /turn-credentials endpoint can't be reached.
+const FALLBACK_ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
 ];
+
+// TURN credentials live on the backend (fetched from Metered) so the API key is
+// never shipped to the browser and a new account can be swapped in without
+// rebuilding the frontend. Cache the result for the session.
+let cachedIceServers: RTCIceServer[] | null = null;
+const fetchIceServers = async (): Promise<RTCIceServer[]> => {
+  if (cachedIceServers) return cachedIceServers;
+  try {
+    const res = await apiClient.get<{ data: RTCIceServer[] }>("/turn-credentials");
+    cachedIceServers = res.data.data?.length ? res.data.data : FALLBACK_ICE_SERVERS;
+  } catch {
+    cachedIceServers = FALLBACK_ICE_SERVERS;
+  }
+  return cachedIceServers;
+};
 
 export interface RemotePeer {
   userName: string;
@@ -19,7 +39,7 @@ export interface CallApi {
   localStream: MediaStream | null;
   remotePeers: Record<string, RemotePeer>;
   error: string;
-  joinCall: () => Promise<void>;
+  joinCall: (room: string) => Promise<void>;
   leaveCall: () => void;
   toggleMic: () => void;
   toggleCam: () => void;
@@ -28,17 +48,23 @@ export interface CallApi {
 
 export const useCall = (
   socket: AppSocket | null,
-  sessionId: string,
   userName: string,
 ): CallApi => {
   const socketRef = useRef<AppSocket | null>(socket);
   socketRef.current = socket;
 
   const peersRef = useRef(new Map<string, RTCPeerConnection>());
+  // ICE candidates can arrive before the peer's remoteDescription is set (they
+  // race with the async offer/answer handling). Adding one too early throws and
+  // the candidate is lost, which can silently break media. Buffer per peer and
+  // flush once the remote description is in place.
+  const pendingIceRef = useRef(new Map<string, RTCIceCandidateInit[]>());
   const mediaRef = useRef<MediaStream | null>(null);
   const screenRef = useRef<MediaStream | null>(null);
+  const iceServersRef = useRef<RTCIceServer[]>(FALLBACK_ICE_SERVERS);
   const namesRef = useRef(new Map<string, string>());
   const inCallRef = useRef(false);
+  const roomRef = useRef("");
 
   const [inCall, setInCall] = useState(false);
   const [micOn, setMicOn] = useState(true);
@@ -51,6 +77,7 @@ export const useCall = (
   const teardown = useCallback(() => {
     peersRef.current.forEach((pc) => pc.close());
     peersRef.current.clear();
+    pendingIceRef.current.clear();
     mediaRef.current?.getTracks().forEach((track) => track.stop());
     mediaRef.current = null;
     screenRef.current?.getTracks().forEach((track) => track.stop());
@@ -67,7 +94,7 @@ export const useCall = (
     if (!socket) return undefined;
 
     const createPeer = (remoteId: string, name: string): RTCPeerConnection => {
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const pc = new RTCPeerConnection({ iceServers: iceServersRef.current });
       namesRef.current.set(remoteId, name);
       setRemotePeers((prev) => ({
         ...prev,
@@ -77,6 +104,18 @@ export const useCall = (
       mediaRef.current
         ?.getTracks()
         .forEach((track) => pc.addTrack(track, mediaRef.current as MediaStream));
+
+      // Guarantee audio/video m-lines even when we have no local tracks, so a
+      // user without a camera/mic can still receive the remote stream.
+      const localKinds = new Set(
+        (mediaRef.current?.getTracks() ?? []).map((track) => track.kind),
+      );
+      if (!localKinds.has("audio")) {
+        pc.addTransceiver("audio", { direction: "recvonly" });
+      }
+      if (!localKinds.has("video")) {
+        pc.addTransceiver("video", { direction: "recvonly" });
+      }
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
@@ -124,6 +163,19 @@ export const useCall = (
       namesRef.current.set(socketId, name);
     };
 
+    const flushPendingIce = async (from: string, pc: RTCPeerConnection) => {
+      const queued = pendingIceRef.current.get(from);
+      if (!queued?.length) return;
+      pendingIceRef.current.delete(from);
+      for (const candidate of queued) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch {
+          /* ignore invalid candidates */
+        }
+      }
+    };
+
     const onOffer = async ({
       from,
       sdp,
@@ -135,6 +187,7 @@ export const useCall = (
         peersRef.current.get(from) ??
         createPeer(from, namesRef.current.get(from) ?? "Peer");
       await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      await flushPendingIce(from, pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       socket.emit("callSignalAnswer", { to: from, sdp: answer });
@@ -147,9 +200,10 @@ export const useCall = (
       from: string;
       sdp: RTCSessionDescriptionInit;
     }) => {
-      await peersRef.current
-        .get(from)
-        ?.setRemoteDescription(new RTCSessionDescription(sdp));
+      const pc = peersRef.current.get(from);
+      if (!pc) return;
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      await flushPendingIce(from, pc);
     };
 
     const onIce = async ({
@@ -159,12 +213,19 @@ export const useCall = (
       from: string;
       candidate: RTCIceCandidateInit;
     }) => {
+      const pc = peersRef.current.get(from);
+      // Until the remote description exists, addIceCandidate would throw and the
+      // candidate would be lost — queue it and flush after set*Description.
+      if (!pc || !pc.remoteDescription) {
+        const queue = pendingIceRef.current.get(from) ?? [];
+        queue.push(candidate);
+        pendingIceRef.current.set(from, queue);
+        return;
+      }
       try {
-        await peersRef.current
-          .get(from)
-          ?.addIceCandidate(new RTCIceCandidate(candidate));
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch {
-        /* ignore late candidates */
+        /* ignore invalid candidates */
       }
     };
 
@@ -197,39 +258,64 @@ export const useCall = (
 
   useEffect(() => () => teardown(), [teardown]);
 
-  const joinCall = useCallback(async () => {
+  const joinCall = useCallback(async (room: string) => {
     const activeSocket = socketRef.current;
     if (!activeSocket || inCallRef.current) return;
-    try {
-      let stream: MediaStream;
+    // Load ICE servers (STUN + TURN relay creds) before any peer is created.
+    iceServersRef.current = await fetchIceServers();
+    // getUserMedia only exists in a secure context (HTTPS or localhost). When
+    // the app is opened over http://<lan-ip> it's undefined, so guard first to
+    // give a clear message instead of a cryptic crash.
+    let stream: MediaStream | null = null;
+    let insecure = false;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      insecure = true;
+    } else {
+      // Best-effort media: video+audio → audio only → none. Never block the
+      // call itself — a user without devices can still see/hear the other side.
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: true,
           video: true,
         });
       } catch {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: false,
-        });
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: false,
+          });
+        } catch {
+          stream = null;
+        }
       }
-      mediaRef.current = stream;
-      setLocalStream(stream);
-      setMicOn(stream.getAudioTracks().length > 0);
-      setCamOn(stream.getVideoTracks().length > 0);
-      setError("");
-      inCallRef.current = true;
-      setInCall(true);
-      activeSocket.emit("callJoin", { sessionId, userName });
-    } catch {
-      setError("Could not access camera or microphone. Check permissions.");
     }
-  }, [sessionId, userName]);
+    mediaRef.current = stream;
+    setLocalStream(stream);
+    const hasVideo = Boolean(stream && stream.getVideoTracks().length > 0);
+    setMicOn(Boolean(stream && stream.getAudioTracks().length > 0));
+    setCamOn(hasVideo);
+    setError(
+      insecure
+        ? "Camera and microphone need a secure page. Open the app via http://localhost or HTTPS — not an http://<ip-address> URL."
+        : !stream
+          ? "No camera or microphone available — you joined as a viewer."
+          : !hasVideo
+            ? "Camera unavailable — it may be in use by another tab or app. The other side won't see your video."
+            : "",
+    );
+    inCallRef.current = true;
+    roomRef.current = room;
+    setInCall(true);
+    activeSocket.emit("callJoin", { sessionId: room, userName });
+  }, [userName]);
 
   const leaveCall = useCallback(() => {
-    socketRef.current?.emit("callLeave", { sessionId });
+    if (roomRef.current) {
+      socketRef.current?.emit("callLeave", { sessionId: roomRef.current });
+    }
+    roomRef.current = "";
     teardown();
-  }, [sessionId, teardown]);
+  }, [teardown]);
 
   const toggleMic = useCallback(() => {
     const tracks = mediaRef.current?.getAudioTracks() ?? [];
