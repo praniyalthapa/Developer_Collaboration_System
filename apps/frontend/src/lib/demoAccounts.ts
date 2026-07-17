@@ -33,7 +33,7 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
     password: "Demo@12345",
     role: "user",
     tagline: "Backend developer",
-    photoUrl: "https://randomuser.me/api/portraits/men/68.jpg",
+    photoUrl: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQJstOBuP_dmt6JxCMoGNMpOOJSheIyDzbZRLM6Ghil2g&s=10",
   },
   {
     name: "Praniyal Thapa",
