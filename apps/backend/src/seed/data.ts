@@ -96,7 +96,7 @@ export const demoUsers: SeedUser[] = [
     about:
       "Backend developer focused on distributed systems, queues, and observability.",
     skills: ["Go", "Node.js", "MongoDB", "Docker", "AWS"],
-    photoUrl: "https://randomuser.me/api/portraits/men/68.jpg",
+    photoUrl: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQJstOBuP_dmt6JxCMoGNMpOOJSheIyDzbZRLM6Ghil2g&s=10",
   },
   {
     firstName: "Sofia",
