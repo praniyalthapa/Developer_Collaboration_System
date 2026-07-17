@@ -68,12 +68,25 @@ export const searchUsers = async (
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
 
-  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(escaped, "i");
+  // Split the query by spaces into individual words/tokens
+  const words = trimmed.split(/\s+/);
+
+  // Map each word into an $or condition matching firstName, lastName, or skills
+  const andConditions = words.map((word) => {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(escaped, "i");
+    return {
+      $or: [
+        { firstName: regex },
+        { lastName: regex },
+        { skills: regex },
+      ],
+    };
+  });
 
   const users = await User.find({
     _id: { $ne: userId },
-    $or: [{ firstName: regex }, { lastName: regex }, { skills: regex }],
+    $and: andConditions,
   })
     .select(USER_SAFE_FIELDS)
     .limit(10)
@@ -81,8 +94,7 @@ export const searchUsers = async (
 
   if (users.length === 0) return [];
 
-  // Resolve how the viewer relates to each match so the UI can show an honest
-  // action. A request existing in ANY state means we can't send a fresh one.
+
   const ids = users.map((user) => user._id);
   const requests = await ConnectionRequest.find({
     $or: [
@@ -112,11 +124,8 @@ export const searchUsers = async (
       // Only a still-pending request is actionable.
       status = iAmSender ? "requested" : "incoming";
     } else {
-      // rejected / ignored: the request is resolved and stale, so it leaves no
-      // active relationship — treat as "none" so a fresh request can be sent.
       continue;
     }
-    // "connected" is the strongest signal — never let it be downgraded.
     if (statusByUser.get(otherId) !== "connected") {
       statusByUser.set(otherId, status);
     }
@@ -127,6 +136,7 @@ export const searchUsers = async (
     connectionStatus: statusByUser.get(user._id.toString()) ?? "none",
   }));
 };
+
 
 export const getFeed = async (
   userId: Types.ObjectId,
