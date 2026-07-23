@@ -29,7 +29,7 @@ const envSchema = z.object({
 
   RUN_SEED: booleanFromString(false),
   CODE_EXECUTION_ENABLED: booleanFromString(true),
-  ADMIN_EMAIL: z.string().email().default("admin@devcollab.dev"),
+  ADMIN_EMAIL: z.string().email().default("aashish.neupane@devcollab.dev"),
   ADMIN_PASSWORD: z.string().min(8).default("Admin@12345"),
 
   GOOGLE_CLIENT_ID: z.string().optional(),
