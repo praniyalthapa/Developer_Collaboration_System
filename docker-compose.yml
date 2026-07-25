@@ -31,6 +31,14 @@ services:
       WEB_APP_URL: "http://localhost:5173"
       BACKEND_BASE_URL: "http://localhost:7777"
       RUN_SEED: "true"
+      GOOGLE_CLIENT_ID: "433374685104-u1gg23q1aiu0jl4ushtc4hj6al70shia.apps.googleusercontent.com"
+      GOOGLE_CLIENT_SECRET: "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"
+      GOOGLE_CALLBACK_URL: "http://localhost:7777/api/auth/google/callback"
+      SMTP_HOST: "smtp.gmail.com"
+      SMTP_PORT: "465"
+      SMTP_USER: "devcollabsystem@gmail.com"
+      SMTP_PASS: "lsui pozs eteq xbki"
+      MAIL_FROM: "DevCollab System <devcollabsystem@gmail.com>"
     depends_on:
       mongo:
         condition: service_healthy
