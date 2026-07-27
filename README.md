@@ -97,8 +97,10 @@ refactor/
 
 - Node.js 20+ and npm
 - Docker and Docker Compose (for the containerized path)
-- For local multi-language code execution: `python3`, `java` (11+), and `go` on
-  your PATH (JavaScript and TypeScript work without them)
+- For local multi-language code execution: `python3`, a JDK (11+, for
+  `java Main.java` single-file launch), and `go` on your PATH (JavaScript and
+  TypeScript work without them). The Docker image installs all three itself, so
+  the containerized path needs nothing extra.
 
 ## Quick start with Docker
 
