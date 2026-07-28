@@ -5,7 +5,6 @@ import { setUser } from "../features/userSlice";
 import { login, signup } from "../api/auth.api";
 import { getProfile } from "../api/profile.api";
 import { API_BASE_URL, getErrorMessage } from "../lib/apiClient";
-import { DemoAccounts } from "../components/DemoAccounts";
 
 type Mode = "login" | "signup";
 
@@ -77,13 +76,6 @@ const Login = () => {
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const handleDemoSelect = (email: string, secret: string) => {
-    setMode("login");
-    setEmailId(email);
-    setPassword(secret);
-    void runLogin(email, secret);
   };
 
   return (
@@ -205,7 +197,7 @@ const Login = () => {
         </button>
       </div>
 
-        <DemoAccounts onSelect={handleDemoSelect} disabled={submitting} />
+        {/* <DemoAccounts onSelect={handleDemoSelect} disabled={submitting} /> */}
       </div>
     </div>
   );
