@@ -34,7 +34,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
   const [socket, setSocket] = useState<AppSocket | null>(null);
-  const media = useCall(socket, myName);
+  const media = useCall(socket, myName, myId);
 
   const [status, setStatus] = useState<CallStatus>("idle");
   const [peer, setPeer] = useState<CallTarget | null>(null);

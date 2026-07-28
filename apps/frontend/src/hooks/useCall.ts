@@ -49,6 +49,7 @@ export interface CallApi {
 export const useCall = (
   socket: AppSocket | null,
   userName: string,
+  userId?: string,
 ): CallApi => {
   const socketRef = useRef<AppSocket | null>(socket);
   socketRef.current = socket;
@@ -239,12 +240,20 @@ export const useCall = (
       });
     };
 
+    // The same account joined this call from another device — this older device
+    // has been dropped server-side, so tear the call down locally too.
+    const onTakenOver = () => {
+      roomRef.current = "";
+      teardown();
+    };
+
     socket.on("callReady", onReady);
     socket.on("callPeerJoined", onPeerJoined);
     socket.on("callOffer", onOffer);
     socket.on("callAnswer", onAnswer);
     socket.on("callIce", onIce);
     socket.on("callPeerLeft", onPeerLeft);
+    socket.on("callTakenOver", onTakenOver);
 
     return () => {
       socket.off("callReady", onReady);
@@ -253,8 +262,9 @@ export const useCall = (
       socket.off("callAnswer", onAnswer);
       socket.off("callIce", onIce);
       socket.off("callPeerLeft", onPeerLeft);
+      socket.off("callTakenOver", onTakenOver);
     };
-  }, [socket]);
+  }, [socket, teardown]);
 
   useEffect(() => () => teardown(), [teardown]);
 
@@ -306,8 +316,8 @@ export const useCall = (
     inCallRef.current = true;
     roomRef.current = room;
     setInCall(true);
-    activeSocket.emit("callJoin", { sessionId: room, userName });
-  }, [userName]);
+    activeSocket.emit("callJoin", { sessionId: room, userName, userId: userId ?? "" });
+  }, [userName, userId]);
 
   const leaveCall = useCallback(() => {
     if (roomRef.current) {

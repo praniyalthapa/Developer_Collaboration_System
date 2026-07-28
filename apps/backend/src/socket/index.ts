@@ -58,7 +58,11 @@ interface ClientToServerEvents {
   userTyping: (payload: { sessionId: string; userName: string }) => void;
   userStoppedTyping: (payload: { sessionId: string }) => void;
   leaveCodeSession: (payload: { sessionId: string; userName: string }) => void;
-  callJoin: (payload: { sessionId: string; userName: string }) => void;
+  callJoin: (payload: {
+    sessionId: string;
+    userName: string;
+    userId: string;
+  }) => void;
   sessionCallInvite: (payload: { sessionId: string; fromName: string }) => void;
   sessionCallInviteCancel: (payload: { sessionId: string }) => void;
   callLeave: (payload: { sessionId: string }) => void;
@@ -115,6 +119,9 @@ interface ServerToClientEvents {
   userStoppedTyping: () => void;
   codeSessionError: (payload: { message: string }) => void;
   callReady: (payload: { peers: Array<{ socketId: string; userName: string }> }) => void;
+  // Sent to a socket when the same account joins the call from another device,
+  // so this (older) device leaves the call cleanly.
+  callTakenOver: () => void;
   // Rung to the other participants of a code session when someone starts the
   // video call, so they get a prompt instead of the call starting silently.
   sessionCallRinging: (payload: { fromName: string }) => void;
@@ -185,7 +192,12 @@ export const initializeSocket = (
       logger.error("Socket persistSession failed", error);
     }
   };
-  const callRooms = new Map<string, Map<string, string>>();
+  // sessionId -> (socketId -> participant). We track userId per socket so a call
+  // never contains the same account twice (e.g. logged in on two devices).
+  const callRooms = new Map<
+    string,
+    Map<string, { userName: string; userId: string }>
+  >();
   const onlineUsers = new Map<string, Set<string>>();
   const socketToUser = new Map<string, string>();
 
@@ -405,17 +417,30 @@ export const initializeSocket = (
       socket.leave(sessionId);
     });
 
-    socket.on("callJoin", ({ sessionId, userName }) => {
+    socket.on("callJoin", ({ sessionId, userName, userId }) => {
       let room = callRooms.get(sessionId);
       if (!room) {
         room = new Map();
         callRooms.set(sessionId, room);
       }
-      const existing = Array.from(room.entries()).map(([socketId, name]) => ({
+      // One peer per user: if this account is already in the call from another
+      // device/tab, drop that older socket. Otherwise a 1:1 call turns into a
+      // self-mesh (your two devices connect to each other) and the other side
+      // sees you twice. Latest device wins.
+      for (const [existingId, info] of room) {
+        if (info.userId === userId && existingId !== socket.id) {
+          room.delete(existingId);
+          for (const peerId of room.keys()) {
+            io.to(peerId).emit("callPeerLeft", { socketId: existingId });
+          }
+          io.to(existingId).emit("callTakenOver");
+        }
+      }
+      const existing = Array.from(room.entries()).map(([socketId, info]) => ({
         socketId,
-        userName: name,
+        userName: info.userName,
       }));
-      room.set(socket.id, userName);
+      room.set(socket.id, { userName, userId });
       socket.emit("callReady", { peers: existing });
       for (const peer of existing) {
         io.to(peer.socketId).emit("callPeerJoined", {
