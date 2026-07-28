@@ -59,6 +59,8 @@ interface ClientToServerEvents {
   userStoppedTyping: (payload: { sessionId: string }) => void;
   leaveCodeSession: (payload: { sessionId: string; userName: string }) => void;
   callJoin: (payload: { sessionId: string; userName: string }) => void;
+  sessionCallInvite: (payload: { sessionId: string; fromName: string }) => void;
+  sessionCallInviteCancel: (payload: { sessionId: string }) => void;
   callLeave: (payload: { sessionId: string }) => void;
   callSignalOffer: (payload: { to: string; sdp: unknown }) => void;
   callSignalAnswer: (payload: { to: string; sdp: unknown }) => void;
@@ -113,6 +115,10 @@ interface ServerToClientEvents {
   userStoppedTyping: () => void;
   codeSessionError: (payload: { message: string }) => void;
   callReady: (payload: { peers: Array<{ socketId: string; userName: string }> }) => void;
+  // Rung to the other participants of a code session when someone starts the
+  // video call, so they get a prompt instead of the call starting silently.
+  sessionCallRinging: (payload: { fromName: string }) => void;
+  sessionCallRingingCancel: () => void;
   callPeerJoined: (payload: { socketId: string; userName: string }) => void;
   callPeerLeft: (payload: { socketId: string }) => void;
   callOffer: (payload: { from: string; sdp: unknown }) => void;
@@ -417,6 +423,15 @@ export const initializeSocket = (
           userName,
         });
       }
+    });
+
+    // Ring the rest of the code session (everyone in the room except the
+    // caller) so they can accept and join the same call room.
+    socket.on("sessionCallInvite", ({ sessionId, fromName }) => {
+      socket.to(sessionId).emit("sessionCallRinging", { fromName });
+    });
+    socket.on("sessionCallInviteCancel", ({ sessionId }) => {
+      socket.to(sessionId).emit("sessionCallRingingCancel");
     });
 
     socket.on("presenceJoin", async ({ userId }) => {

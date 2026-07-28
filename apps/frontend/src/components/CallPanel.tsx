@@ -18,7 +18,15 @@ const ExpandButton = ({ onClick }: { onClick: () => void }) => (
   </button>
 );
 
-export const CallPanel = ({ call, room }: { call: CallApi; room: string }) => {
+export const CallPanel = ({
+  call,
+  room,
+  onStart,
+}: {
+  call: CallApi;
+  room: string;
+  onStart?: () => void;
+}) => {
   const remotes = Object.entries(call.remotePeers);
   const [fullscreen, setFullscreen] = useState(false);
 
@@ -46,7 +54,10 @@ export const CallPanel = ({ call, room }: { call: CallApi; room: string }) => {
         ) : null}
         <button
           type="button"
-          onClick={() => void call.joinCall(room)}
+          onClick={() => {
+            void call.joinCall(room);
+            onStart?.();
+          }}
           className="btn btn-brand btn-sm mt-3 w-full"
         >
           Start call

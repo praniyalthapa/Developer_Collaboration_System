@@ -34,12 +34,15 @@ const CodeSession = () => {
   const [socket, setSocket] = useState<AppSocket | null>(null);
   const [chatMessages, setChatMessages] = useState<SessionChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
+  // Name of whoever started the video call, while we're being rung.
+  const [incomingCallFrom, setIncomingCallFrom] = useState<string | null>(null);
 
   const socketRef = useRef<AppSocket | null>(null);
   const typingTimer = useRef<number | null>(null);
   const typingStopTimer = useRef<number | null>(null);
   const bindingCleanup = useRef<(() => void) | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const wasInCallRef = useRef(false);
 
   // The shared CRDT document — created once and kept for the page's lifetime.
   const docRef = useRef<Y.Doc | undefined>(undefined);
@@ -90,7 +93,15 @@ const CodeSession = () => {
 
     socket.on("languageUpdate", ({ language: incoming }) => setLanguage(incoming));
     socket.on("participantJoined", ({ participants: next }) => setParticipants(next));
-    socket.on("participantLeft", ({ participants: next }) => setParticipants(next));
+    socket.on("participantLeft", ({ participants: next }) => {
+      setParticipants(next);
+      // The person who was ringing us may have left — drop the prompt.
+      setIncomingCallFrom(null);
+    });
+
+    // Someone in the session started the video call and is ringing us.
+    socket.on("sessionCallRinging", ({ fromName }) => setIncomingCallFrom(fromName));
+    socket.on("sessionCallRingingCancel", () => setIncomingCallFrom(null));
     socket.on("userTyping", ({ userName: typer }) => {
       setTypingUser(typer);
       if (typingTimer.current) window.clearTimeout(typingTimer.current);
@@ -131,6 +142,14 @@ const CodeSession = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
+  // When the caller leaves the call, tell the others to stop ringing.
+  useEffect(() => {
+    if (wasInCallRef.current && !call.inCall && socketRef.current && sessionId) {
+      socketRef.current.emit("sessionCallInviteCancel", { sessionId });
+    }
+    wasInCallRef.current = call.inCall;
+  }, [call.inCall, sessionId]);
+
   const handleEditorMount: OnMount = (editor, monaco) => {
     const doc = docRef.current;
     if (!doc) return;
@@ -160,6 +179,19 @@ const CodeSession = () => {
     socketRef.current.emit("sessionChat", { sessionId, userName, text });
     setChatInput("");
   };
+
+  // Caller side: after joining the call, ring the other participants.
+  const handleStartCall = () => {
+    if (!socketRef.current || !sessionId) return;
+    socketRef.current.emit("sessionCallInvite", { sessionId, fromName: userName });
+  };
+
+  const handleAcceptCall = () => {
+    setIncomingCallFrom(null);
+    if (sessionId) void call.joinCall(sessionId);
+  };
+
+  const handleDeclineCall = () => setIncomingCallFrom(null);
 
   if (loading) return <FullScreenLoader label="Opening session..." />;
 
@@ -222,7 +254,7 @@ const CodeSession = () => {
         </div>
 
         <aside className="flex min-h-0 flex-col gap-3 overflow-auto">
-          <CallPanel call={call} room={sessionId ?? ""} />
+          <CallPanel call={call} room={sessionId ?? ""} onStart={handleStartCall} />
           <div className="surface flex flex-col gap-3 p-4">
             <h2 className="font-semibold">Participants ({participants.length})</h2>
             {participants.length === 0 ? (
@@ -297,6 +329,39 @@ const CodeSession = () => {
           </div>
         </aside>
       </div>
+
+      {incomingCallFrom && !call.inCall ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="surface w-full max-w-xs rounded-2xl p-6 text-center shadow-2xl">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center">
+              <span className="absolute h-16 w-16 animate-ping rounded-full bg-primary/30" />
+              <span className="relative flex h-16 w-16 items-center justify-center rounded-full bg-primary text-2xl font-bold text-primary-content">
+                {incomingCallFrom.charAt(0).toUpperCase()}
+              </span>
+            </div>
+            <h3 className="mt-4 text-lg font-bold">{incomingCallFrom}</h3>
+            <p className="mt-1 text-sm text-base-content/60">
+              wants you to join the video call
+            </p>
+            <div className="mt-6 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={handleDeclineCall}
+                className="btn btn-error btn-sm flex-1"
+              >
+                Decline
+              </button>
+              <button
+                type="button"
+                onClick={handleAcceptCall}
+                className="btn btn-success btn-sm flex-1"
+              >
+                Join
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

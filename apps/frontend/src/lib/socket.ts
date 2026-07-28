@@ -43,6 +43,8 @@ export interface ServerToClientEvents {
   callReady: (payload: {
     peers: Array<{ socketId: string; userName: string }>;
   }) => void;
+  sessionCallRinging: (payload: { fromName: string }) => void;
+  sessionCallRingingCancel: () => void;
   callPeerJoined: (payload: { socketId: string; userName: string }) => void;
   callPeerLeft: (payload: { socketId: string }) => void;
   callOffer: (payload: { from: string; sdp: RTCSessionDescriptionInit }) => void;
@@ -99,6 +101,8 @@ export interface ClientToServerEvents {
   userStoppedTyping: (payload: { sessionId: string }) => void;
   leaveCodeSession: (payload: { sessionId: string; userName: string }) => void;
   callJoin: (payload: { sessionId: string; userName: string }) => void;
+  sessionCallInvite: (payload: { sessionId: string; fromName: string }) => void;
+  sessionCallInviteCancel: (payload: { sessionId: string }) => void;
   callLeave: (payload: { sessionId: string }) => void;
   callSignalOffer: (payload: { to: string; sdp: RTCSessionDescriptionInit }) => void;
   callSignalAnswer: (payload: { to: string; sdp: RTCSessionDescriptionInit }) => void;
