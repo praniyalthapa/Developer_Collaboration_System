@@ -49,6 +49,9 @@ const CodeSession = () => {
   if (!docRef.current) docRef.current = new Y.Doc();
 
   const userName = user ? `${user.firstName} ${user.lastName ?? ""}`.trim() : "";
+  // The participants list (from the server) includes ourselves, so a call only
+  // makes sense once someone with a different userId is also in the session.
+  const otherPresent = participants.some((p) => p.userId !== user?._id);
   const call = useCall(socket, userName);
 
   useEffect(() => {
@@ -254,7 +257,12 @@ const CodeSession = () => {
         </div>
 
         <aside className="flex min-h-0 flex-col gap-3 overflow-auto">
-          <CallPanel call={call} room={sessionId ?? ""} onStart={handleStartCall} />
+          <CallPanel
+            call={call}
+            room={sessionId ?? ""}
+            onStart={handleStartCall}
+            canStart={otherPresent}
+          />
           <div className="surface flex flex-col gap-3 p-4">
             <h2 className="font-semibold">Participants ({participants.length})</h2>
             {participants.length === 0 ? (

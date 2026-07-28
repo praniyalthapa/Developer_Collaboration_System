@@ -22,10 +22,14 @@ export const CallPanel = ({
   call,
   room,
   onStart,
+  canStart = true,
 }: {
   call: CallApi;
   room: string;
   onStart?: () => void;
+  // The call can only connect once someone else is in the session, so the
+  // "Start call" button stays disabled until another developer joins.
+  canStart?: boolean;
 }) => {
   const remotes = Object.entries(call.remotePeers);
   const [fullscreen, setFullscreen] = useState(false);
@@ -52,8 +56,14 @@ export const CallPanel = ({
         {call.error ? (
           <p className="mt-2 text-xs text-error">{call.error}</p>
         ) : null}
+        {!canStart ? (
+          <p className="mt-2 text-xs text-base-content/55">
+            Waiting for the other developer to join the session…
+          </p>
+        ) : null}
         <button
           type="button"
+          disabled={!canStart}
           onClick={() => {
             void call.joinCall(room);
             onStart?.();
