@@ -12,16 +12,18 @@ pipeline {
             }
         }
 
-        stage('SAST - SonarQube') {
-            steps {
-                dir('apps/backend') {
-                    withSonarQubeEnv('MySonarQube') {
-                        sh 'sonar-scanner'
-                    }
+   stage('SAST - SonarQube') {
+    steps {
+        dir('apps/frontend') {
+            withSonarQubeEnv('MySonarQube') {
+                script {
+                    def scannerHome = tool 'SonarScanner'
+                    sh "${scannerHome}/bin/sonar-scanner"
                 }
             }
         }
-
+    }
+}
         stage('Build Image') {
             steps {
                 sh """
