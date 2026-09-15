@@ -1,0 +1,35 @@
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_NAME = "backend-build"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'refactor', url: 'https://github.com/praniyalthapa/Developer_Collaboration_System.git'
+            }
+        }
+
+        stage('SAST - SonarQube') {
+            steps {
+                dir('apps/backend') {
+                    withSonarQubeEnv('MySonarQube') {
+                        sh 'sonar-scanner'
+                    }
+                }
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                sh """
+                    docker build \
+                      -t ${IMAGE_NAME}:${BUILD_NUMBER} \
+                      apps/backend
+                """
+            }
+        }
+    }
+}
