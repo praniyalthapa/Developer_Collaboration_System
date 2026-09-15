@@ -1,0 +1,45 @@
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_NAME = "frontend-build"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'refactor', url: 'https://github.com/praniyalthapa/Developer_Collaboration_System.git'
+            }
+        }
+
+        stage('SAST - SonarQube') {
+            steps {
+                dir('apps/frontend') {
+                    withSonarQubeEnv('MySonarQube') {
+                        sh 'sonar-scanner'
+                    }
+                }
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                sh """
+                    docker build \
+                      --build-arg VITE_API_BASE_URL=/api \
+                      -t ${IMAGE_NAME}:${BUILD_NUMBER} \
+                      apps/frontend
+                """
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh """
+                    docker rm -f frontend-preview || true
+                    docker run -d -p 8081:80 --name frontend-preview ${IMAGE_NAME}:${BUILD_NUMBER}
+                """
+            }
+        }
+    }
+}
