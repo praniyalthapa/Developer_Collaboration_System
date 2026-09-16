@@ -6,9 +6,11 @@ pipeline {
     }
 
     stages {
+
         stage('Checkout') {
             steps {
-                git branch: 'refactor', url: 'https://github.com/praniyalthapa/Developer_Collaboration_System.git'
+                git branch: 'refactor',
+                    url: 'https://github.com/praniyalthapa/Developer_Collaboration_System.git'
             }
         }
 
@@ -57,8 +59,35 @@ pipeline {
         stage('Deploy') {
             steps {
                 sh """
-                    docker rm -f frontend-preview || true
-                    docker run -d -p 8081:80 --name frontend-preview ${IMAGE_NAME}:${BUILD_NUMBER}
+                    docker pull ${IMAGE_NAME}:${BUILD_NUMBER}
+
+                    # Rename current container for rollback
+                    docker rename frontend-preview frontend-preview-old 2>/dev/null || true
+
+                    # Start new version
+                    docker run -d \\
+                      -p 8081:80 \\
+                      --name frontend-preview \\
+                      ${IMAGE_NAME}:${BUILD_NUMBER}
+
+                    # Wait for application startup
+                    sleep 5
+
+                    # Health check
+                    curl -f http://localhost:8081 || (
+                        echo "Health check failed, rolling back"
+
+                        docker rm -f frontend-preview
+
+                        docker rename frontend-preview-old frontend-preview 2>/dev/null || true
+
+                        exit 1
+                    )
+
+                    echo "Deployment successful"
+
+                    # Remove old container after successful deployment
+                    docker rm -f frontend-preview-old 2>/dev/null || true
                 """
             }
         }
