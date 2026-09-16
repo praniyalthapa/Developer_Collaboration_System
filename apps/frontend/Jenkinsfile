@@ -1,3 +1,61 @@
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_NAME = "praniyalthapa/devcollab-frontend"
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'refactor',
+                    url: 'https://github.com/praniyalthapa/Developer_Collaboration_System.git'
+            }
+        }
+
+        stage('SAST - SonarQube') {
+            steps {
+                dir('apps/frontend') {
+                    withSonarQubeEnv('MySonarQube') {
+                        script {
+                            def scannerHome = tool 'SonarScanner'
+                            sh "${scannerHome}/bin/sonar-scanner"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                sh """
+                    docker build \\
+                      --build-arg VITE_API_BASE_URL=/api \\
+                      -t ${IMAGE_NAME}:${BUILD_NUMBER} \\
+                      -t ${IMAGE_NAME}:latest \\
+                      apps/frontend
+                """
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh """
+                        echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
+                        docker push ${IMAGE_NAME}:${BUILD_NUMBER}
+                        docker push ${IMAGE_NAME}:latest
+                        docker logout
+                    """
+                }
+            }
+        }
+
         stage('Deploy') {
             steps {
                 sh """
@@ -26,5 +84,6 @@
                 """
             }
         }
+
     }
 }
