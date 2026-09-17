@@ -2,16 +2,30 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "backend-build"
+        IMAGE_NAME = "praniyalthapa/devcollab-backend"
     }
 
     stages {
+
         stage('Checkout') {
             steps {
-                git branch: 'refactor', url: 'https://github.com/praniyalthapa/Developer_Collaboration_System.git'
+                git branch: 'refactor',
+                    url: 'https://github.com/praniyalthapa/Developer_Collaboration_System.git'
             }
         }
 
+        stage('Install & Test') {
+            steps {
+                dir('apps/backend') {
+                    sh '''
+                        npm ci
+                        npm run lint
+                        npm run typecheck
+                        npm run test
+                    '''
+                }
+            }
+        }
 
         stage('SAST - SonarQube') {
             steps {
@@ -25,12 +39,60 @@ pipeline {
                 }
             }
         }
+
         stage('Build Image') {
             steps {
                 sh """
-                    docker build \
-                      -t ${IMAGE_NAME}:${BUILD_NUMBER} \
+                    docker build \\
+                      -t ${IMAGE_NAME}:${BUILD_NUMBER} \\
+                      -t ${IMAGE_NAME}:latest \\
                       apps/backend
+                """
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh """
+                        echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
+                        docker push ${IMAGE_NAME}:${BUILD_NUMBER}
+                        docker push ${IMAGE_NAME}:latest
+                        docker logout
+                    """
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh """
+                    docker pull ${IMAGE_NAME}:${BUILD_NUMBER}
+
+                    docker rm -f backend-preview-old 2>/dev/null || true
+
+                    docker rename backend-preview backend-preview-old 2>/dev/null || true
+
+                    docker run -d \\
+                      -p 5000:5000 \\
+                      --name backend-preview \\
+                      ${IMAGE_NAME}:${BUILD_NUMBER}
+
+                    sleep 5
+
+                    curl -f http://localhost:5000 || (
+                        echo "Health check failed, rolling back"
+                        docker rm -f backend-preview
+                        docker rename backend-preview-old backend-preview 2>/dev/null || true
+                        exit 1
+                    )
+
+                    echo "Deployment successful"
+                    docker rm -f backend-preview-old 2>/dev/null || true
                 """
             }
         }
