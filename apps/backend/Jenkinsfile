@@ -70,30 +70,42 @@ pipeline {
 
         stage('Deploy') {
             steps {
-                sh """
-                    docker pull ${IMAGE_NAME}:${BUILD_NUMBER}
+                withCredentials([
+                    string(credentialsId: 'backend-jwt-secret', variable: 'JWT_SECRET'),
+                    string(credentialsId: 'backend-mongo-uri',  variable: 'MONGO_URI')
+                ]) {
+                    sh """
+                        docker pull ${IMAGE_NAME}:${BUILD_NUMBER}
 
-                    docker rm -f backend-preview-old 2>/dev/null || true
+                        docker rm -f backend-preview-old 2>/dev/null || true
+                        docker rename backend-preview backend-preview-old 2>/dev/null || true
 
-                    docker rename backend-preview backend-preview-old 2>/dev/null || true
+                        docker run -d \\
+                          -p 7777:7777 \\
+                          -e PORT=7777 \\
+                          -e HOST=0.0.0.0 \\
+                          -e NODE_ENV=production \\
+                          -e MONGO_URI="\$MONGO_URI" \\
+                          -e JWT_SECRET="\$JWT_SECRET" \\
+                          -e RUN_SEED=false \\
+                          -e CORS_ORIGIN=http://localhost:5173 \\
+                          --name backend-preview \\
+                          ${IMAGE_NAME}:${BUILD_NUMBER}
 
-                    docker run -d \\
-                      -p 5000:5000 \\
-                      --name backend-preview \\
-                      ${IMAGE_NAME}:${BUILD_NUMBER}
+                        sleep 8
 
-                    sleep 5
+                        curl -s -o /dev/null -w "%{http_code}" http://localhost:7777/ | grep -qE "^(2|3|401)" || (
+                            echo "Health check failed, rolling back"
+                            docker logs backend-preview
+                            docker rm -f backend-preview
+                            docker rename backend-preview-old backend-preview 2>/dev/null || true
+                            exit 1
+                        )
 
-                    curl -f http://localhost:5000 || (
-                        echo "Health check failed, rolling back"
-                        docker rm -f backend-preview
-                        docker rename backend-preview-old backend-preview 2>/dev/null || true
-                        exit 1
-                    )
-
-                    echo "Deployment successful"
-                    docker rm -f backend-preview-old 2>/dev/null || true
-                """
+                        echo "Deployment successful"
+                        docker rm -f backend-preview-old 2>/dev/null || true
+                    """
+                }
             }
         }
     }
