@@ -14,6 +14,15 @@ pipeline {
             }
         }
 
+        stage('Set Version Vars') {
+            steps {
+                script {
+                    env.GIT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                }
+                echo "Building commit: ${env.GIT_SHA}"
+            }
+        }
+
         stage('SAST - SonarQube') {
             steps {
                 dir('apps/frontend') {
@@ -27,19 +36,28 @@ pipeline {
             }
         }
 
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        // ---- BUILD ONCE ----
         stage('Build Image') {
             steps {
                 sh """
                     docker build \\
                       --build-arg VITE_API_BASE_URL=/api \\
-                      -t ${IMAGE_NAME}:${BUILD_NUMBER} \\
-                      -t ${IMAGE_NAME}:latest \\
+                      -t ${IMAGE_NAME}:${GIT_SHA} \\
                       apps/frontend
                 """
             }
         }
 
-        stage('Push to Docker Hub') {
+        // ---- PUSH THE ONE IMMUTABLE TAG ----
+        stage('Push Immutable Tag') {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: 'dockerhub-creds',
@@ -48,42 +66,68 @@ pipeline {
                 )]) {
                     sh """
                         echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
-                        docker push ${IMAGE_NAME}:${BUILD_NUMBER}
-                        docker push ${IMAGE_NAME}:latest
+                        docker push ${IMAGE_NAME}:${GIT_SHA}
                         docker logout
                     """
                 }
             }
         }
 
-        stage('Deploy') {
+        // ---- RETAG (NOT REBUILD) AS dev, PUSH THE POINTER ----
+        stage('Promote: Dev') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh """
+                        echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
+                        docker tag ${IMAGE_NAME}:${GIT_SHA} ${IMAGE_NAME}:dev
+                        docker push ${IMAGE_NAME}:dev
+                        docker logout
+                    """
+                }
+            }
+        }
+
+        // ---- DEPLOY dev, WITH ROLLBACK ON FAILED HEALTH CHECK ----
+        stage('Deploy: Dev') {
             steps {
                 sh """
-                    docker pull ${IMAGE_NAME}:${BUILD_NUMBER}
+                    docker pull ${IMAGE_NAME}:dev
 
-                    docker rm -f frontend-preview-old 2>/dev/null || true
-
-                    docker rename frontend-preview frontend-preview-old 2>/dev/null || true
+                    docker rm -f frontend-dev-old 2>/dev/null || true
+                    docker rename frontend-dev frontend-dev-old 2>/dev/null || true
 
                     docker run -d \\
                       -p 8081:80 \\
-                      --name frontend-preview \\
-                      ${IMAGE_NAME}:${BUILD_NUMBER}
+                      --name frontend-dev \\
+                      ${IMAGE_NAME}:dev || (
+                        echo "Run failed, rolling back"
+                        docker rename frontend-dev-old frontend-dev 2>/dev/null || true
+                        exit 1
+                    )
 
                     sleep 5
 
                     curl -f http://localhost:8081 || (
                         echo "Health check failed, rolling back"
-                        docker rm -f frontend-preview
-                        docker rename frontend-preview-old frontend-preview 2>/dev/null || true
+                        docker rm -f frontend-dev
+                        docker rename frontend-dev-old frontend-dev 2>/dev/null || true
                         exit 1
                     )
 
-                    echo "Deployment successful"
-                    docker rm -f frontend-preview-old 2>/dev/null || true
+                    echo "Deployment to dev successful: ${GIT_SHA}"
+                    docker rm -f frontend-dev-old 2>/dev/null || true
                 """
             }
         }
+    }
 
+    post {
+        always {
+            sh "docker image prune -f"
+        }
     }
 }
