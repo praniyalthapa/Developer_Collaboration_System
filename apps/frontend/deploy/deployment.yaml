@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devcollab-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: devcollab-frontend
+  template:
+    metadata:
+      labels:
+        app: devcollab-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: praniyalthapa/devcollab-frontend:initial
+          ports:
+            - containerPort: 80
