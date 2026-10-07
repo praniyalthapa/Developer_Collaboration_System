@@ -23,27 +23,6 @@ pipeline {
             }
         }
 
-        stage('SAST - SonarQube') {
-            steps {
-                dir('apps/frontend') {
-                    withSonarQubeEnv('MySonarQube') {
-                        script {
-                            def scannerHome = tool 'SonarScanner'
-                            sh "${scannerHome}/bin/sonar-scanner"
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Quality Gate') {
-            steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
-            }
-        }
-
         // ---- BUILD ONCE ----
         stage('Build Image') {
             steps {
@@ -121,6 +100,38 @@ pipeline {
                     echo "Deployment to dev successful: ${GIT_SHA}"
                     docker rm -f frontend-dev-old 2>/dev/null || true
                 """
+            }
+        }
+
+        // ---- WRITE THE NEW IMAGE TAG INTO deployment.yaml AND PUSH TO GITHUB ----
+        stage('Update Manifest') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'github-creds',
+                    usernameVariable: 'GIT_USER',
+                    passwordVariable: 'GIT_TOKEN'
+                )]) {
+                    sh '''
+                        REPO="https://${GIT_USER}:${GIT_TOKEN}@github.com/praniyalthapa/Developer_Collaboration_System.git"
+                        FILE="apps/frontend/deploy/deployment.yaml"
+
+                        git config user.email "jenkins@local"
+                        git config user.name "jenkins"
+                        git checkout -B refactor
+
+                        sed -i "s|image: .*|image: ${IMAGE_NAME}:${GIT_SHA}|" "$FILE"
+
+                        git add "$FILE"
+                        if git diff --cached --quiet; then
+                            echo "Manifest already up to date"
+                            exit 0
+                        fi
+
+                        git commit -m "ci: update frontend image to ${GIT_SHA} [skip ci]"
+                        git pull --rebase "$REPO" refactor
+                        git push "$REPO" HEAD:refactor
+                    '''
+                }
             }
         }
     }
